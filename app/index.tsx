@@ -1,12 +1,17 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, SafeAreaView, ActivityIndicator
+  StyleSheet, SafeAreaView, ActivityIndicator, Dimensions
 } from 'react-native';
+import { useRouter } from 'expo-router';
+
+const { width } = Dimensions.get('window');
+const isWeb = width > 600;
 
 export default function LoginScreen() {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
   const handleSendOTP = () => {
     if (phone.length !== 10) {
@@ -14,66 +19,63 @@ export default function LoginScreen() {
       return;
     }
     setLoading(true);
-    // Firebase OTP will go here later
     setTimeout(() => {
       setLoading(false);
-      alert('OTP Sent to +91 ' + phone);
+      router.push('/otp');
     }, 1500);
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.inner}>
+      <View style={styles.wrapper}>
+        <View style={styles.inner}>
 
-        {/* Logo / Title */}
-        <View style={styles.logoArea}>
-          <Text style={styles.appName}>🏘 Panchyat</Text>
-          <Text style={styles.tagline}>Your society, connected.</Text>
-        </View>
-
-        {/* Login Card */}
-        <View style={styles.card}>
-          <Text style={styles.title}>Welcome</Text>
-          <Text style={styles.subtitle}>Enter your phone number to continue</Text>
-
-          {/* Phone Input */}
-          <View style={styles.phoneRow}>
-            <View style={styles.countryCode}>
-              <Text style={styles.countryText}>+91</Text>
-            </View>
-            <TextInput
-              style={styles.input}
-              placeholder="10-digit mobile number"
-              placeholderTextColor="#999"
-              keyboardType="number-pad"
-              maxLength={10}
-              value={phone}
-              onChangeText={setPhone}
-            />
+          <View style={styles.logoArea}>
+            <Text style={styles.appName}>🏘 Panchyat</Text>
+            <Text style={styles.tagline}>Your society, connected.</Text>
           </View>
 
-          {/* Button */}
-          <TouchableOpacity
-            style={[styles.button, phone.length !== 10 && styles.buttonDisabled]}
-            onPress={handleSendOTP}
-            disabled={phone.length !== 10 || loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>Send OTP</Text>
-            )}
-          </TouchableOpacity>
+          <View style={styles.card}>
+            <Text style={styles.title}>Welcome</Text>
+            <Text style={styles.subtitle}>Enter your phone number to continue</Text>
 
-          <Text style={styles.note}>
-            You'll receive a 6-digit OTP on your number
+            <View style={styles.phoneRow}>
+              <View style={styles.countryCode}>
+                <Text style={styles.countryText}>+91</Text>
+              </View>
+              <TextInput
+                style={styles.input}
+                placeholder="10-digit mobile number"
+                placeholderTextColor="#999"
+                keyboardType="number-pad"
+                maxLength={10}
+                value={phone}
+                onChangeText={setPhone}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.button, phone.length !== 10 && styles.buttonDisabled]}
+              onPress={handleSendOTP}
+              disabled={phone.length !== 10 || loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Send OTP</Text>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.note}>
+              You'll receive a 6-digit OTP on your number
+            </Text>
+          </View>
+
+          <Text style={styles.footer}>
+            New members need admin approval to access the app
           </Text>
+
         </View>
-
-        <Text style={styles.footer}>
-          New members need admin approval to access the app
-        </Text>
-
       </View>
     </SafeAreaView>
   );
@@ -84,9 +86,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f0f4ff',
   },
-  inner: {
+  wrapper: {
     flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  inner: {
+    width: '100%',
+    maxWidth: 480,
     paddingHorizontal: 24,
   },
   logoArea: {
@@ -94,7 +101,7 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   appName: {
-    fontSize: 36,
+    fontSize: isWeb ? 42 : 36,
     fontWeight: 'bold',
     color: '#1a1a2e',
     letterSpacing: 1,
