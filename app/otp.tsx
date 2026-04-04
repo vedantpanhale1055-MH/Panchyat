@@ -1,15 +1,15 @@
 import { useState, useRef } from 'react';
+import { useRouter } from 'expo-router';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, SafeAreaView, ActivityIndicator, Dimensions
+  StyleSheet, SafeAreaView, ActivityIndicator
 } from 'react-native';
-
-const { width } = Dimensions.get('window');
 
 export default function OTPScreen() {
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const inputs = useRef<Array<TextInput | null>>([]);
+  const router = useRouter();
 
   const handleChange = (text: string, index: number) => {
     const newOtp = [...otp];
@@ -35,7 +35,7 @@ export default function OTPScreen() {
     setLoading(true);
     setTimeout(() => {
       setLoading(false);
-      alert('OTP Verified! Welcome to Panchyat ✅');
+      router.push('/register');
     }, 1500);
   };
 
@@ -54,7 +54,7 @@ export default function OTPScreen() {
             <Text style={styles.title}>Enter OTP</Text>
             <Text style={styles.subtitle}>
               We sent a 6-digit code to{'\n'}
-              <Text style={styles.phone}>+91 9876543210</Text>
+              <Text style={styles.phone}>your phone number</Text>
             </Text>
 
             <View style={styles.otpRow}>
@@ -93,7 +93,7 @@ export default function OTPScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity onPress={() => alert('Go back to login')}>
+          <TouchableOpacity onPress={() => router.back()}>
             <Text style={styles.back}>← Change phone number</Text>
           </TouchableOpacity>
 
@@ -152,13 +152,13 @@ const styles = StyleSheet.create({
     color: '#4f46e5',
     fontWeight: '600',
   },
-    otpRow: {
+  otpRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     marginBottom: 28,
     gap: 10,
   },
-    otpBox: {
+  otpBox: {
     width: 44,
     height: 54,
     borderRadius: 12,
