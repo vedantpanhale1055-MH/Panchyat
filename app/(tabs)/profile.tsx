@@ -57,4 +57,3 @@ const styles = StyleSheet.create({
   },
   logoutText: { color: "#dc2626", fontWeight: "700", fontSize: 15 },
 });
-git add .

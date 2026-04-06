@@ -4,6 +4,8 @@ import {
   StyleSheet, SafeAreaView, ActivityIndicator, ScrollView
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { auth, db } from '../firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 export default function RegisterScreen() {
   const [name, setName] = useState('');
@@ -15,16 +17,33 @@ export default function RegisterScreen() {
 
   const wings = ['A', 'B', 'C', 'D', 'E'];
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (!name || !flatNo || !wing) {
       alert('Please fill all fields');
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('Not authenticated');
+
+      await setDoc(doc(db, 'users', user.uid), {
+        name,
+        flatNo,
+        wing,
+        phone: user.phoneNumber,
+        role: 'resident',
+        approved: false,
+        createdAt: new Date().toISOString(),
+        societyId: 'society_001',
+      });
+
       router.push('/approval');
-    }, 1500);
+    } catch (error: any) {
+      alert('Error saving profile: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const isValid = name.length > 0 && flatNo.length > 0 && wing.length > 0;
@@ -35,20 +54,17 @@ export default function RegisterScreen() {
         <View style={styles.wrapper}>
           <View style={styles.inner}>
 
-            {/* Logo */}
             <View style={styles.logoArea}>
               <Text style={styles.appName}>🏘 Panchyat</Text>
               <Text style={styles.tagline}>Tell us about yourself</Text>
             </View>
 
-            {/* Card */}
             <View style={styles.card}>
               <Text style={styles.title}>Create Profile</Text>
               <Text style={styles.subtitle}>
                 This info helps your neighbours and admin identify you
               </Text>
 
-              {/* Name */}
               <Text style={styles.label}>Full Name</Text>
               <TextInput
                 style={styles.input}
@@ -58,7 +74,6 @@ export default function RegisterScreen() {
                 onChangeText={setName}
               />
 
-              {/* Flat Number */}
               <Text style={styles.label}>Flat Number</Text>
               <TextInput
                 style={styles.input}
@@ -68,7 +83,6 @@ export default function RegisterScreen() {
                 onChangeText={setFlatNo}
               />
 
-              {/* Wing Selection */}
               <Text style={styles.label}>Wing</Text>
               <View style={styles.wingRow}>
                 {wings.map(w => (
@@ -84,14 +98,12 @@ export default function RegisterScreen() {
                 ))}
               </View>
 
-              {/* Info box */}
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
                   ℹ️  After registering, your account will be reviewed by the society admin before you can access the app.
                 </Text>
               </View>
 
-              {/* Submit Button */}
               <TouchableOpacity
                 style={[styles.button, !isValid && styles.buttonDisabled]}
                 onPress={handleRegister}
@@ -105,7 +117,6 @@ export default function RegisterScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Back */}
             <TouchableOpacity onPress={() => router.back()}>
               <Text style={styles.back}>← Back</Text>
             </TouchableOpacity>
