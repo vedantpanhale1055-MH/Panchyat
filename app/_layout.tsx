@@ -7,6 +7,7 @@ export default function RootLayout() {
       <Stack.Screen name="otp" />
       <Stack.Screen name="register" />
       <Stack.Screen name="approval" />
+      <Stack.Screen name="(tabs)" />
     </Stack>
   );
 }
