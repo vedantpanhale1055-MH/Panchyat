@@ -41,7 +41,7 @@ export default function OTPScreen() {
     try {
       const confirmation = (global as any).confirmationResult;
       await confirmation.confirm(fullOtp);
-      router.push("/register");
+      router.replace('/');
     } catch (error: any) {
       alert("Invalid OTP. Please try again.");
     } finally {
