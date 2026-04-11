@@ -1,192 +1,184 @@
 import { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, SafeAreaView,
-  ScrollView, TouchableOpacity, ActivityIndicator
+  View, Text, StyleSheet, SafeAreaView, ScrollView,
+  TouchableOpacity, ActivityIndicator, Alert
 } from 'react-native';
-import { db, auth } from '../../firebase';
-import {
-  collection, query, orderBy, limit,
-  getDocs, doc, getDoc
-} from 'firebase/firestore';
-
-type Announcement = {
-  id: string;
-  title: string;
-  body: string;
-  createdAt: string;
-  type: 'notice' | 'event' | 'alert';
-};
-
-type Complaint = {
-  id: string;
-  title: string;
-  status: string;
-  urgency: string;
-  upvotes: number;
-};
+import { useRouter } from 'expo-router';
+import { db } from '../../firebase';
+import { collection, onSnapshot, query, orderBy, limit, addDoc } from 'firebase/firestore';
+import { useUser } from '../../context/UserContext';
 
 export default function HomeScreen() {
-  const [userName, setUserName] = useState('');
-  const [flatNo, setFlatNo] = useState('');
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [recentComplaints, setRecentComplaints] = useState<Complaint[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useUser();
+  const router = useRouter();
+  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [complaints, setComplaints] = useState<any[]>([]);
+  const [loadingA, setLoadingA] = useState(true);
+  const [loadingC, setLoadingC] = useState(true);
 
   useEffect(() => {
-    loadData();
+    const q = query(
+      collection(db, 'societies', 'society_001', 'announcements'),
+      orderBy('createdAt', 'desc'),
+      limit(5)
+    );
+    const unsub = onSnapshot(q, snap => {
+      setAnnouncements(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoadingA(false);
+    });
+    return unsub;
   }, []);
 
-  const loadData = async () => {
-    try {
-      const uid = auth.currentUser?.uid;
-      if (uid) {
-        const userDoc = await getDoc(doc(db, 'users', uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setUserName(data.name || 'Resident');
-          setFlatNo(data.flatNo || '');
-        }
-      }
-
-      const annSnap = await getDocs(
-        query(
-          collection(db, 'societies', 'society_001', 'announcements'),
-          orderBy('createdAt', 'desc'),
-          limit(5)
-        )
-      );
-      setAnnouncements(annSnap.docs.map(d => ({ id: d.id, ...d.data() } as Announcement)));
-
-      const compSnap = await getDocs(
-        query(
-          collection(db, 'societies', 'society_001', 'complaints'),
-          orderBy('createdAt', 'desc'),
-          limit(3)
-        )
-      );
-      setRecentComplaints(compSnap.docs.map(d => ({ id: d.id, ...d.data() } as Complaint)));
-    } catch (e) {
-      console.log(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const typeColor = (t: string) => {
-    if (t === 'alert') return { bg: '#fee2e2', text: '#dc2626', icon: '🚨' };
-    if (t === 'event') return { bg: '#dcfce7', text: '#16a34a', icon: '🎉' };
-    return { bg: '#eef2ff', text: '#4f46e5', icon: '📢' };
-  };
-
-  const urgencyColor = (u: string) => {
-    if (u === 'High') return '#dc2626';
-    if (u === 'Medium') return '#d97706';
-    return '#16a34a';
-  };
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#4f46e5" />
-        </View>
-      </SafeAreaView>
+  useEffect(() => {
+    const q = query(
+      collection(db, 'societies', 'society_001', 'complaints'),
+      orderBy('createdAt', 'desc'),
+      limit(5)
     );
-  }
+    const unsub = onSnapshot(q, snap => {
+      setComplaints(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoadingC(false);
+    });
+    return unsub;
+  }, []);
+
+  const handleSOS = () => {
+    Alert.alert(
+      '🆘 SOS Alert',
+      'This will alert ALL society members and security. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'SEND SOS',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await addDoc(collection(db, 'societies', 'society_001', 'sos'), {
+                triggeredBy: user?.name,
+                flatNo: user?.flatNo,
+                wing: user?.wing,
+                phone: user?.phone,
+                timestamp: new Date().toISOString(),
+                resolved: false,
+              });
+              Alert.alert('✅ SOS Sent', 'All residents and security have been alerted!');
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const getGreeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning 👋';
+    if (h < 17) return 'Good afternoon 👋';
+    return 'Good evening 👋';
+  };
+
+  const statusColor = (s: string) => {
+    if (s === 'Resolved') return '#16a34a';
+    if (s === 'In Progress') return '#d97706';
+    return '#64748b';
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>Good morning 👋</Text>
-            <Text style={styles.userName}>{userName}</Text>
-            <Text style={styles.flatTag}>Flat {flatNo} • Society Panchyat</Text>
-          </View>
-          <View style={styles.logoCircle}>
-            <Text style={styles.logoText}>🏘</Text>
-          </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.greeting}>{getGreeting()}</Text>
+          <Text style={styles.name}>{user?.name || 'Resident'}</Text>
+          <Text style={styles.flat}>Flat {user?.flatNo} • Society Panchyat</Text>
         </View>
+        <TouchableOpacity onPress={() => router.push('/(tabs)/profile')}>
+          <View style={styles.avatarCircle}>
+            <Text style={styles.avatarText}>{user?.name?.charAt(0)?.toUpperCase() || '?'}</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Quick Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickRow}>
-            <View style={styles.quickCard}>
-              <Text style={styles.quickIcon}>🚪</Text>
-              <Text style={styles.quickLabel}>Approve Visitor</Text>
-            </View>
-            <View style={styles.quickCard}>
-              <Text style={styles.quickIcon}>🛠</Text>
-              <Text style={styles.quickLabel}>Raise Complaint</Text>
-            </View>
-            <View style={styles.quickCard}>
-              <Text style={styles.quickIcon}>💬</Text>
-              <Text style={styles.quickLabel}>Community Chat</Text>
-            </View>
-            <View style={styles.quickCard}>
-              <Text style={styles.quickIcon}>🆘</Text>
-              <Text style={[styles.quickLabel, { color: '#dc2626' }]}>SOS</Text>
-            </View>
-          </View>
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <View style={styles.actionsGrid}>
+          <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/(tabs)/gate')}>
+            <Text style={styles.actionEmoji}>🚪</Text>
+            <Text style={styles.actionLabel}>Approve Visitor</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/(tabs)/complaints')}>
+            <Text style={styles.actionEmoji}>🛠</Text>
+            <Text style={styles.actionLabel}>Raise Complaint</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/(tabs)/community')}>
+            <Text style={styles.actionEmoji}>💬</Text>
+            <Text style={styles.actionLabel}>Community Chat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionCard, styles.sosCard]} onPress={handleSOS}>
+            <Text style={styles.actionEmoji}>🆘</Text>
+            <Text style={[styles.actionLabel, styles.sosLabel]}>SOS</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Announcements */}
+        <Text style={styles.sectionTitle}>Announcements</Text>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Announcements</Text>
-          {announcements.length === 0 ? (
-            <View style={styles.emptyCard}>
+          {loadingA ? (
+            <ActivityIndicator color="#4f46e5" style={{ padding: 20 }} />
+          ) : announcements.length === 0 ? (
+            <View style={styles.emptyBox}>
               <Text style={styles.emptyEmoji}>📢</Text>
               <Text style={styles.emptyText}>No announcements yet</Text>
             </View>
           ) : (
-            announcements.map(item => {
-              const c = typeColor(item.type);
-              return (
-                <View key={item.id} style={styles.annCard}>
-                  <View style={[styles.annBadge, { backgroundColor: c.bg }]}>
-                    <Text style={{ fontSize: 12 }}>{c.icon}</Text>
-                    <Text style={[styles.annBadgeText, { color: c.text }]}>
-                      {item.type?.toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={styles.annTitle}>{item.title}</Text>
-                  <Text style={styles.annBody}>{item.body}</Text>
-                  <Text style={styles.annDate}>
-                    {new Date(item.createdAt).toLocaleDateString('en-IN', {
-                      day: 'numeric', month: 'short'
-                    })}
+            announcements.map(a => (
+              <View key={a.id} style={styles.announcementCard}>
+                <View style={styles.announcementHeader}>
+                  <Text style={styles.announcementBadge}>📢 Announcement</Text>
+                  <Text style={styles.timeText}>
+                    {new Date(a.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   </Text>
                 </View>
-              );
-            })
-          )}
-        </View>
-
-        {/* Recent Complaints */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Complaints</Text>
-          {recentComplaints.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyEmoji}>✅</Text>
-              <Text style={styles.emptyText}>No open complaints</Text>
-            </View>
-          ) : (
-            recentComplaints.map(item => (
-              <View key={item.id} style={styles.compCard}>
-                <View style={styles.compRow}>
-                  <Text style={styles.compTitle}>{item.title}</Text>
-                  <View style={[styles.urgDot, { backgroundColor: urgencyColor(item.urgency) }]} />
-                </View>
-                <View style={styles.compFooter}>
-                  <Text style={styles.compStatus}>{item.status}</Text>
-                  <Text style={styles.compVotes}>👍 {item.upvotes}</Text>
-                </View>
+                <Text style={styles.announcementTitle}>{a.title}</Text>
+                <Text style={styles.announcementBody}>{a.body}</Text>
               </View>
             ))
           )}
         </View>
+
+        {/* Recent Complaints */}
+        <Text style={styles.sectionTitle}>Recent Complaints</Text>
+        <View style={styles.section}>
+          {loadingC ? (
+            <ActivityIndicator color="#4f46e5" style={{ padding: 20 }} />
+          ) : complaints.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyEmoji}>✅</Text>
+              <Text style={styles.emptyText}>No open complaints</Text>
+            </View>
+          ) : (
+            complaints.map(c => (
+              <TouchableOpacity
+                key={c.id}
+                style={styles.complaintCard}
+                onPress={() => router.push('/(tabs)/complaints')}
+              >
+                <View style={styles.complaintTop}>
+                  <View style={[styles.urgencyDot, {
+                    backgroundColor: c.urgency === 'High' ? '#dc2626' : c.urgency === 'Medium' ? '#d97706' : '#16a34a'
+                  }]} />
+                  <Text style={styles.complaintTitle}>{c.title}</Text>
+                  <Text style={[styles.statusText, { color: statusColor(c.status) }]}>{c.status}</Text>
+                </View>
+                <Text style={styles.complaintMeta}>{c.userName} • Flat {c.flatNo}</Text>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -194,55 +186,54 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f0f4ff' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
-    backgroundColor: '#4f46e5', padding: 24, paddingTop: 32,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#4f46e5',
+    padding: 20,
+    paddingTop: 24,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  greeting: { fontSize: 14, color: '#c7d2fe' },
-  userName: { fontSize: 24, fontWeight: 'bold', color: '#fff', marginTop: 2 },
-  flatTag: { fontSize: 13, color: '#a5b4fc', marginTop: 4 },
-  logoCircle: {
-    width: 52, height: 52, borderRadius: 26,
-    backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center',
+  greeting: { fontSize: 13, color: '#c7d2fe' },
+  name: { fontSize: 22, fontWeight: 'bold', color: '#fff', marginTop: 2 },
+  flat: { fontSize: 13, color: '#c7d2fe', marginTop: 2 },
+  avatarCircle: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)',
   },
-  logoText: { fontSize: 26 },
-  section: { padding: 16, paddingBottom: 0 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a2e', marginBottom: 12 },
-  quickRow: { flexDirection: 'row', gap: 10 },
-  quickCard: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 14, padding: 14,
-    alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, elevation: 2,
+  avatarText: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  scroll: { flex: 1, padding: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a2e', marginTop: 16, marginBottom: 10 },
+  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 4 },
+  actionCard: {
+    width: '47%', backgroundColor: '#fff', borderRadius: 14,
+    padding: 16, alignItems: 'center',
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
-  quickIcon: { fontSize: 24, marginBottom: 6 },
-  quickLabel: { fontSize: 11, fontWeight: '600', color: '#555', textAlign: 'center' },
-  emptyCard: {
-    backgroundColor: '#fff', borderRadius: 14, padding: 24,
-    alignItems: 'center', marginBottom: 12,
+  sosCard: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fca5a5' },
+  actionEmoji: { fontSize: 28, marginBottom: 8 },
+  actionLabel: { fontSize: 13, fontWeight: '600', color: '#1a1a2e', textAlign: 'center' },
+  sosLabel: { color: '#dc2626' },
+  section: {
+    backgroundColor: '#fff', borderRadius: 14,
+    overflow: 'hidden', marginBottom: 4,
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
-  emptyEmoji: { fontSize: 32, marginBottom: 8 },
+  emptyBox: { alignItems: 'center', padding: 32 },
+  emptyEmoji: { fontSize: 36, marginBottom: 8 },
   emptyText: { fontSize: 14, color: '#888' },
-  annCard: {
-    backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 10,
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
-  },
-  annBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 3,
-    borderRadius: 20, marginBottom: 8,
-  },
-  annBadgeText: { fontSize: 10, fontWeight: '700' },
-  annTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a2e', marginBottom: 4 },
-  annBody: { fontSize: 13, color: '#666', lineHeight: 20 },
-  annDate: { fontSize: 11, color: '#aaa', marginTop: 6 },
-  compCard: {
-    backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 8,
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2,
-  },
-  compRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  compTitle: { fontSize: 14, fontWeight: '600', color: '#1a1a2e', flex: 1 },
-  urgDot: { width: 10, height: 10, borderRadius: 5 },
-  compFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
-  compStatus: { fontSize: 12, color: '#888' },
-  compVotes: { fontSize: 12, color: '#4f46e5', fontWeight: '600' },
+  announcementCard: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  announcementHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  announcementBadge: { fontSize: 11, fontWeight: '700', color: '#4f46e5' },
+  timeText: { fontSize: 11, color: '#aaa' },
+  announcementTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a2e', marginBottom: 4 },
+  announcementBody: { fontSize: 13, color: '#666', lineHeight: 20 },
+  complaintCard: { padding: 14, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  complaintTop: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  urgencyDot: { width: 8, height: 8, borderRadius: 4 },
+  complaintTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1a1a2e' },
+  statusText: { fontSize: 11, fontWeight: '700' },
+  complaintMeta: { fontSize: 12, color: '#aaa', marginLeft: 16 },
 });
