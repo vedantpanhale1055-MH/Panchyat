@@ -4,7 +4,7 @@ import {
   TouchableOpacity, TextInput, ActivityIndicator, Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
 import {
   collection, addDoc, onSnapshot, query, orderBy,
   deleteDoc, doc, updateDoc
@@ -21,36 +21,28 @@ export default function AdminScreen() {
   const { colors } = useTheme();
   const [tab, setTab] = useState<AdminTab>('announce');
 
-  // Announcements
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [annTitle, setAnnTitle] = useState('');
   const [annBody, setAnnBody] = useState('');
   const [posting, setPosting] = useState(false);
 
-  // Residents
   const [residents, setResidents] = useState<any[]>([]);
-
-  // Complaints
   const [complaints, setComplaints] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsubs: (() => void)[] = [];
-
-    const annQ = query(collection(db, 'societies', SOCIETY_ID, 'announcements'), orderBy('createdAt', 'desc'));
-    unsubs.push(onSnapshot(annQ, (snap) => setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...d.data() })))));
-
-    // Fetch pending residents from users collection
-    const { getDocs, where } = require('firebase/firestore');
-    // Use onSnapshot for real-time residents
-    const { collection: col, query: q, onSnapshot: ons } = require('firebase/firestore');
-    unsubs.push(onSnapshot(col(db, 'users'), (snap: any) => {
-      setResidents(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
-    }));
-
-    const compQ = query(collection(db, 'societies', SOCIETY_ID, 'complaints'), orderBy('createdAt', 'desc'));
-    unsubs.push(onSnapshot(compQ, (snap) => setComplaints(snap.docs.map((d) => ({ id: d.id, ...d.data() })))));
-
-    return () => unsubs.forEach((u) => u());
+    const annUnsub = onSnapshot(
+      query(collection(db, 'societies', SOCIETY_ID, 'announcements'), orderBy('createdAt', 'desc')),
+      (snap) => setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    );
+    const resUnsub = onSnapshot(
+      collection(db, 'users'),
+      (snap) => setResidents(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    );
+    const compUnsub = onSnapshot(
+      query(collection(db, 'societies', SOCIETY_ID, 'complaints'), orderBy('createdAt', 'desc')),
+      (snap) => setComplaints(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    );
+    return () => { annUnsub(); resUnsub(); compUnsub(); };
   }, []);
 
   const handlePostAnnouncement = async () => {
@@ -63,7 +55,8 @@ export default function AdminScreen() {
         postedBy: user?.name,
         createdAt: new Date().toISOString(),
       });
-      setAnnTitle(''); setAnnBody('');
+      setAnnTitle('');
+      setAnnBody('');
     } catch (e: any) {
       alert('Error: ' + e.message);
     } finally {
@@ -72,41 +65,67 @@ export default function AdminScreen() {
   };
 
   const handleDeleteAnnouncement = (id: string) => {
-    Alert.alert('Delete Announcement', 'This will remove it for everyone.', [
+    Alert.alert('Delete Announcement', 'Remove for all residents?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
-        onPress: () => deleteDoc(doc(db, 'societies', SOCIETY_ID, 'announcements', id)),
+        onPress: async () => {
+          try {
+            await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'announcements', id));
+          } catch (e: any) {
+            alert('Failed: ' + e.message);
+          }
+        },
       },
     ]);
   };
 
   const handleApproveResident = async (uid: string) => {
-    await updateDoc(doc(db, 'users', uid), { approved: true });
+    try {
+      await updateDoc(doc(db, 'users', uid), { approved: true });
+    } catch (e: any) {
+      alert('Error: ' + e.message);
+    }
   };
 
   const handleRejectResident = (uid: string) => {
-    Alert.alert('Reject Resident', 'Remove this resident from the society?', [
+    Alert.alert('Reject Resident', 'Remove this resident?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Reject', style: 'destructive',
-        onPress: () => deleteDoc(doc(db, 'users', uid)),
+        onPress: async () => {
+          try {
+            await deleteDoc(doc(db, 'users', uid));
+          } catch (e: any) {
+            alert('Failed: ' + e.message);
+          }
+        },
       },
     ]);
   };
 
   const handleDeleteComplaint = (id: string) => {
-    Alert.alert('Delete Complaint', 'Remove this complaint permanently?', [
+    Alert.alert('Delete Complaint', 'Remove permanently?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
-        onPress: () => deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id)),
+        onPress: async () => {
+          try {
+            await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id));
+          } catch (e: any) {
+            alert('Failed: ' + e.message);
+          }
+        },
       },
     ]);
   };
 
   const handleStatusChange = async (id: string, status: string) => {
-    await updateDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id), { status });
+    try {
+      await updateDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id), { status });
+    } catch (e: any) {
+      alert('Failed: ' + e.message);
+    }
   };
 
   const TABS: { key: AdminTab; label: string }[] = [
@@ -121,9 +140,11 @@ export default function AdminScreen() {
     return colors.primary;
   };
 
+  const pending = residents.filter((r) => !r.approved);
+  const approved = residents.filter((r) => r.approved);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
-      {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={[styles.back, { color: colors.primary }]}>← Back</Text>
@@ -132,7 +153,6 @@ export default function AdminScreen() {
         <View style={{ width: 60 }} />
       </View>
 
-      {/* Tab Bar */}
       <View style={[styles.tabBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         {TABS.map((t) => (
           <TouchableOpacity
@@ -149,7 +169,6 @@ export default function AdminScreen() {
 
       <ScrollView contentContainerStyle={styles.scroll}>
 
-        {/* ── ANNOUNCE TAB ── */}
         {tab === 'announce' && (
           <View>
             <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -170,16 +189,26 @@ export default function AdminScreen() {
                 onPress={handlePostAnnouncement}
                 disabled={posting}
               >
-                {posting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.postBtnText}>Post Announcement</Text>}
+                {posting
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.postBtnText}>Post Announcement</Text>}
               </TouchableOpacity>
             </View>
 
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>Past Announcements</Text>
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>
+              Past Announcements ({announcements.length})
+            </Text>
+            {announcements.length === 0 && (
+              <Text style={[styles.emptyText, { color: colors.subtext }]}>No announcements yet.</Text>
+            )}
             {announcements.map((a) => (
               <View key={a.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.rowBetween}>
                   <Text style={[styles.annTitle, { color: colors.text }]}>{a.title}</Text>
-                  <TouchableOpacity onPress={() => handleDeleteAnnouncement(a.id)}>
+                  <TouchableOpacity
+                    onPress={() => handleDeleteAnnouncement(a.id)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  >
                     <Text style={styles.deleteIcon}>🗑</Text>
                   </TouchableOpacity>
                 </View>
@@ -187,17 +216,18 @@ export default function AdminScreen() {
                 <Text style={[styles.annMeta, { color: colors.muted }]}>By {a.postedBy}</Text>
               </View>
             ))}
-            {announcements.length === 0 && <Text style={[styles.emptyText, { color: colors.subtext }]}>No announcements yet.</Text>}
           </View>
         )}
 
-        {/* ── RESIDENTS TAB ── */}
         {tab === 'residents' && (
           <View>
             <Text style={[styles.sectionHeading, { color: colors.text }]}>
-              Pending Approval ({residents.filter(r => !r.approved).length})
+              Pending Approval ({pending.length})
             </Text>
-            {residents.filter(r => !r.approved).map((r) => (
+            {pending.length === 0 && (
+              <Text style={[styles.emptyText, { color: colors.subtext }]}>No pending residents ✅</Text>
+            )}
+            {pending.map((r) => (
               <View key={r.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <Text style={[styles.residentName, { color: colors.text }]}>{r.name}</Text>
                 <Text style={[styles.residentMeta, { color: colors.subtext }]}>
@@ -219,15 +249,12 @@ export default function AdminScreen() {
                 </View>
               </View>
             ))}
-            {residents.filter(r => !r.approved).length === 0 && (
-              <Text style={[styles.emptyText, { color: colors.subtext }]}>No pending residents. ✅</Text>
-            )}
 
             <Text style={[styles.sectionHeading, { color: colors.text }]}>
-              All Residents ({residents.filter(r => r.approved).length})
+              All Residents ({approved.length})
             </Text>
-            {residents.filter(r => r.approved).map((r) => (
-              <View key={r.id} style={[styles.card, styles.residentCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {approved.map((r) => (
+              <View key={r.id} style={[styles.card, styles.residentRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={[styles.residentDot, { backgroundColor: colors.primary }]} />
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.residentName, { color: colors.text }]}>{r.name}</Text>
@@ -240,15 +267,22 @@ export default function AdminScreen() {
           </View>
         )}
 
-        {/* ── COMPLAINTS TAB ── */}
         {tab === 'complaints' && (
           <View>
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>All Complaints ({complaints.length})</Text>
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>
+              All Complaints ({complaints.length})
+            </Text>
+            {complaints.length === 0 && (
+              <Text style={[styles.emptyText, { color: colors.subtext }]}>No complaints yet.</Text>
+            )}
             {complaints.map((c) => (
               <View key={c.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.rowBetween}>
                   <Text style={[styles.annTitle, { color: colors.text }]} numberOfLines={1}>{c.title}</Text>
-                  <TouchableOpacity onPress={() => handleDeleteComplaint(c.id)}>
+                  <TouchableOpacity
+                    onPress={() => handleDeleteComplaint(c.id)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  >
                     <Text style={styles.deleteIcon}>🗑</Text>
                   </TouchableOpacity>
                 </View>
@@ -262,7 +296,7 @@ export default function AdminScreen() {
                       style={[
                         styles.statusBtn,
                         { borderColor: colors.border },
-                        c.status === s && { backgroundColor: statusColor(s) + '20', borderColor: statusColor(s) }
+                        c.status === s && { backgroundColor: statusColor(s) + '20', borderColor: statusColor(s) },
                       ]}
                       onPress={() => handleStatusChange(c.id, s)}
                     >
@@ -274,7 +308,6 @@ export default function AdminScreen() {
                 </View>
               </View>
             ))}
-            {complaints.length === 0 && <Text style={[styles.emptyText, { color: colors.subtext }]}>No complaints yet.</Text>}
           </View>
         )}
 
@@ -291,16 +324,12 @@ const styles = StyleSheet.create({
   },
   back: { fontWeight: '600', fontSize: 15, width: 60 },
   headerTitle: { fontSize: 18, fontWeight: '700' },
-  tabBar: {
-    flexDirection: 'row', borderBottomWidth: 1,
-  },
+  tabBar: { flexDirection: 'row', borderBottomWidth: 1 },
   tabBtn: { flex: 1, paddingVertical: 12, alignItems: 'center' },
   tabLabel: { fontSize: 13, fontWeight: '600' },
   scroll: { padding: 16, paddingBottom: 40 },
   sectionHeading: { fontSize: 15, fontWeight: '700', marginTop: 8, marginBottom: 10 },
-  card: {
-    borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1,
-  },
+  card: { borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1 },
   cardHeading: { fontSize: 15, fontWeight: '700', marginBottom: 12 },
   input: { borderRadius: 12, padding: 12, fontSize: 14, borderWidth: 1, marginBottom: 10 },
   textArea: { height: 90, textAlignVertical: 'top' },
@@ -310,7 +339,7 @@ const styles = StyleSheet.create({
   annTitle: { fontSize: 14, fontWeight: '700', flex: 1, marginRight: 8 },
   annBody: { fontSize: 13, lineHeight: 19, marginBottom: 6 },
   annMeta: { fontSize: 11 },
-  deleteIcon: { fontSize: 18 },
+  deleteIcon: { fontSize: 20, paddingLeft: 8 },
   emptyText: { textAlign: 'center', marginTop: 20, fontSize: 14 },
   residentName: { fontSize: 15, fontWeight: '700', marginBottom: 3 },
   residentMeta: { fontSize: 12 },
@@ -319,7 +348,7 @@ const styles = StyleSheet.create({
   approveTxt: { fontWeight: '700', fontSize: 13 },
   rejectBtn: { flex: 1, padding: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
   rejectTxt: { fontWeight: '700', fontSize: 13 },
-  residentCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  residentRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   residentDot: { width: 8, height: 8, borderRadius: 4 },
   statusRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
   statusBtn: { flex: 1, paddingVertical: 7, borderRadius: 8, borderWidth: 1, alignItems: 'center' },

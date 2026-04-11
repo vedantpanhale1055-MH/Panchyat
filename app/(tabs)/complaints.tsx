@@ -54,7 +54,10 @@ export default function ComplaintsScreen() {
         upvotes: 0,
         createdAt: new Date().toISOString(),
       });
-      setTitle(''); setDescription(''); setUrgency('Medium'); setShowForm(false);
+      setTitle('');
+      setDescription('');
+      setUrgency('Medium');
+      setShowForm(false);
     } catch (e: any) {
       alert('Error: ' + e.message);
     } finally {
@@ -65,13 +68,18 @@ export default function ComplaintsScreen() {
   const handleDelete = (id: string, ownerId: string) => {
     const isOwner = auth.currentUser?.uid === ownerId;
     const isAdmin = user?.role === 'admin';
-    if (!isOwner && !isAdmin) return alert("You can't delete this complaint.");
-
-    Alert.alert('Delete Complaint', 'Are you sure? This cannot be undone.', [
+    if (!isOwner && !isAdmin) return alert("You can't delete this.");
+    Alert.alert('Delete Complaint', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
-        onPress: () => deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id)),
+        onPress: async () => {
+          try {
+            await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id));
+          } catch (e: any) {
+            alert('Failed: ' + e.message);
+          }
+        },
       },
     ]);
   };
@@ -96,6 +104,7 @@ export default function ComplaintsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
+
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Complaints</Text>
@@ -116,16 +125,21 @@ export default function ComplaintsScreen() {
             <Text style={[styles.label, { color: colors.subtext }]}>Title</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
-              placeholder="Short title" placeholderTextColor={colors.muted}
-              value={title} onChangeText={setTitle}
+              placeholder="Short title"
+              placeholderTextColor={colors.muted}
+              value={title}
+              onChangeText={setTitle}
             />
 
             <Text style={[styles.label, { color: colors.subtext }]}>Description</Text>
             <TextInput
               style={[styles.input, styles.textArea, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
-              placeholder="Describe the issue..." placeholderTextColor={colors.muted}
-              value={description} onChangeText={setDescription}
-              multiline numberOfLines={4}
+              placeholder="Describe the issue..."
+              placeholderTextColor={colors.muted}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              numberOfLines={4}
             />
 
             <Text style={[styles.label, { color: colors.subtext }]}>Urgency</Text>
@@ -133,27 +147,44 @@ export default function ComplaintsScreen() {
               {URGENCY_LEVELS.map((u) => (
                 <TouchableOpacity
                   key={u}
-                  style={[styles.urgencyBtn, { borderColor: urgency === u ? urgencyColor(u) : colors.border, backgroundColor: urgency === u ? urgencyColor(u) + '20' : 'transparent' }]}
+                  style={[
+                    styles.urgencyBtn,
+                    {
+                      borderColor: urgency === u ? urgencyColor(u) : colors.border,
+                      backgroundColor: urgency === u ? urgencyColor(u) + '20' : 'transparent',
+                    },
+                  ]}
                   onPress={() => setUrgency(u)}
                 >
-                  <Text style={[styles.urgencyText, { color: urgency === u ? urgencyColor(u) : colors.subtext }]}>{u}</Text>
+                  <Text style={[styles.urgencyText, { color: urgency === u ? urgencyColor(u) : colors.subtext }]}>
+                    {u}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
             <View style={styles.modalBtns}>
-              <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border }]} onPress={() => setShowForm(false)}>
+              <TouchableOpacity
+                style={[styles.cancelBtn, { borderColor: colors.border }]}
+                onPress={() => setShowForm(false)}
+              >
                 <Text style={[styles.cancelText, { color: colors.subtext }]}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary }]} onPress={handleSubmit} disabled={submitting}>
-                {submitting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.submitText}>Submit</Text>}
+              <TouchableOpacity
+                style={[styles.submitBtn, { backgroundColor: colors.primary }]}
+                onPress={handleSubmit}
+                disabled={submitting}
+              >
+                {submitting
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.submitText}>Submit</Text>}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Complaints List */}
+      {/* List */}
       {loading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
       ) : (
@@ -165,32 +196,54 @@ export default function ComplaintsScreen() {
             const isOwner = auth.currentUser?.uid === item.userId;
             const isAdmin = user?.role === 'admin';
             const canDelete = isOwner || isAdmin;
-
             return (
               <TouchableOpacity
                 key={item.id}
                 style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => router.push({ pathname: '/complaint-detail' as any, params: { id: item.id, title: item.title, description: item.description, urgency: item.urgency, status: item.status, userName: item.userName, flatNo: item.flatNo } })}                activeOpacity={0.85}
+                onPress={() =>
+                  router.push({
+                    pathname: '/complaint-detail' as any,
+                    params: {
+                      id: item.id,
+                      title: item.title,
+                      description: item.description,
+                      urgency: item.urgency,
+                      status: item.status,
+                      userName: item.userName,
+                      flatNo: item.flatNo,
+                    },
+                  })
+                }
+                activeOpacity={0.85}
               >
-                {/* Urgency strip */}
                 <View style={[styles.urgencyStrip, { backgroundColor: urgencyColor(item.urgency) }]} />
-
                 <View style={styles.cardContent}>
                   <View style={styles.cardTop}>
-                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
-                    <Text style={[styles.statusTag, { color: statusColor(item.status) }]}>{item.status}</Text>
+                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    <Text style={[styles.statusTag, { color: statusColor(item.status) }]}>
+                      {item.status}
+                    </Text>
                   </View>
-                  <Text style={[styles.cardDesc, { color: colors.subtext }]} numberOfLines={2}>{item.description}</Text>
+                  <Text style={[styles.cardDesc, { color: colors.subtext }]} numberOfLines={2}>
+                    {item.description}
+                  </Text>
                   <View style={styles.cardFooter}>
                     <Text style={[styles.cardMeta, { color: colors.muted }]}>
                       {item.userName} • {item.wing}-{item.flatNo}
                     </Text>
                     <View style={styles.footerActions}>
                       <TouchableOpacity onPress={() => handleUpvote(item.id)} style={styles.upvoteBtn}>
-                        <Text style={[styles.upvoteText, { color: colors.primary }]}>▲ {item.upvotes || 0}</Text>
+                        <Text style={[styles.upvoteText, { color: colors.primary }]}>
+                          ▲ {item.upvotes || 0}
+                        </Text>
                       </TouchableOpacity>
                       {canDelete && (
-                        <TouchableOpacity onPress={() => handleDelete(item.id, item.userId)} style={styles.deleteBtn}>
+                        <TouchableOpacity
+                          onPress={() => handleDelete(item.id, item.userId)}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
                           <Text style={[styles.deleteText, { color: colors.danger }]}>🗑</Text>
                         </TouchableOpacity>
                       )}
@@ -231,10 +284,8 @@ const styles = StyleSheet.create({
   footerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   upvoteBtn: { padding: 4 },
   upvoteText: { fontSize: 13, fontWeight: '700' },
-  deleteBtn: { padding: 4 },
   deleteText: { fontSize: 16 },
   emptyText: { textAlign: 'center', marginTop: 60, fontSize: 14 },
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
   modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 16 },
