@@ -1,137 +1,179 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, FlatList,
-  TextInput, TouchableOpacity, KeyboardAvoidingView, Platform
+  TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { db, auth } from '../../firebase';
 import {
-  collection, addDoc, onSnapshot,
-  query, orderBy
+  collection, addDoc, onSnapshot, query,
+  orderBy, deleteDoc, doc
 } from 'firebase/firestore';
+import { useUser } from '../../context/UserContext';
+import { useTheme } from '../../context/ThemeContext';
 
-type Message = {
-  id: string;
-  text: string;
-  userName: string;
-  flatNo: string;
-  userId: string;
-  createdAt: string;
-};
+const SOCIETY_ID = 'society_001';
+
+type ChatType = 'society' | 'wing';
 
 export default function CommunityScreen() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { user } = useUser();
+  const { colors } = useTheme();
+  const [chatType, setChatType] = useState<ChatType>('society');
+  const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
-  const [chatType, setChatType] = useState<'society' | 'wing'>('society');
+  const [sending, setSending] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
-    const path = chatType === 'society'
-      ? collection(db, 'societies', 'society_001', 'chats', 'society', 'messages')
-      : collection(db, 'societies', 'society_001', 'chats', 'wing_A', 'messages');
+    const chatPath = chatType === 'society'
+      ? collection(db, 'societies', SOCIETY_ID, 'chats', 'society', 'messages')
+      : collection(db, 'societies', SOCIETY_ID, 'chats', `wing_${user?.wing || 'A'}`, 'messages');
 
-    const q = query(path, orderBy('createdAt', 'asc'));
-    const unsub = onSnapshot(q, snapshot => {
-      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Message));
-      setMessages(data);
+    const q = query(chatPath, orderBy('createdAt', 'asc'));
+    return onSnapshot(q, (snap) => {
+      setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     });
-    return unsub;
-  }, [chatType]);
+  }, [chatType, user?.wing]);
 
   const handleSend = async () => {
     if (!text.trim()) return;
-    const user = auth.currentUser;
-    const path = chatType === 'society'
-      ? collection(db, 'societies', 'society_001', 'chats', 'society', 'messages')
-      : collection(db, 'societies', 'society_001', 'chats', 'wing_A', 'messages');
+    setSending(true);
+    try {
+      const chatPath = chatType === 'society'
+        ? collection(db, 'societies', SOCIETY_ID, 'chats', 'society', 'messages')
+        : collection(db, 'societies', SOCIETY_ID, 'chats', `wing_${user?.wing || 'A'}`, 'messages');
 
-    await addDoc(path, {
-      text: text.trim(),
-      userId: user?.uid,
-      userName: 'Vedant',
-      flatNo: '103',
-      createdAt: new Date().toISOString(),
-    });
-    setText('');
+      await addDoc(chatPath, {
+        text: text.trim(),
+        userId: auth.currentUser?.uid,
+        userName: user?.name,
+        flatNo: user?.flatNo,
+        wing: user?.wing,
+        createdAt: new Date().toISOString(),
+      });
+      setText('');
+    } catch (e: any) {
+      alert('Error: ' + e.message);
+    } finally {
+      setSending(false);
+    }
   };
 
-  const isMe = (userId: string) => userId === auth.currentUser?.uid;
+  const handleLongPress = (item: any) => {
+    const isOwner = auth.currentUser?.uid === item.userId;
+    const isAdmin = user?.role === 'admin';
+    if (!isOwner && !isAdmin) return;
 
-  const renderMessage = ({ item }: { item: Message }) => (
-    <View style={[styles.msgRow, isMe(item.userId) && styles.msgRowMe]}>
-      {!isMe(item.userId) && (
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{item.userName?.charAt(0)}</Text>
-        </View>
-      )}
-      <View style={[styles.bubble, isMe(item.userId) && styles.bubbleMe]}>
-        {!isMe(item.userId) && (
-          <Text style={styles.msgName}>{item.userName} • {item.flatNo}</Text>
+    Alert.alert('Delete Message', 'Delete this message?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => {
+          const chatPath = chatType === 'society'
+            ? doc(db, 'societies', SOCIETY_ID, 'chats', 'society', 'messages', item.id)
+            : doc(db, 'societies', SOCIETY_ID, 'chats', `wing_${user?.wing || 'A'}`, 'messages', item.id);
+          deleteDoc(chatPath);
+        },
+      },
+    ]);
+  };
+
+  const formatTime = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch { return ''; }
+  };
+
+  const renderMessage = ({ item }: { item: any }) => {
+    const isMine = auth.currentUser?.uid === item.userId;
+    return (
+      <TouchableOpacity
+        onLongPress={() => handleLongPress(item)}
+        activeOpacity={0.85}
+        style={[styles.msgRow, isMine && styles.msgRowMine]}
+      >
+        {!isMine && (
+          <View style={[styles.avatar, { backgroundColor: colors.primary + '30' }]}>
+            <Text style={[styles.avatarText, { color: colors.primary }]}>
+              {item.userName?.charAt(0)?.toUpperCase()}
+            </Text>
+          </View>
         )}
-        <Text style={[styles.msgText, isMe(item.userId) && styles.msgTextMe]}>
-          {item.text}
-        </Text>
-        <Text style={[styles.msgTime, isMe(item.userId) && styles.msgTimeMe]}>
-          {new Date(item.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-        </Text>
-      </View>
-    </View>
-  );
+        <View style={[
+          styles.bubble,
+          isMine
+            ? { backgroundColor: colors.primary }
+            : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }
+        ]}>
+          {!isMine && (
+            <Text style={[styles.bubbleName, { color: colors.primary }]}>
+              {item.userName} • {item.wing}-{item.flatNo}
+            </Text>
+          )}
+          <Text style={[styles.bubbleText, { color: isMine ? '#fff' : colors.text }]}>
+            {item.text}
+          </Text>
+          <Text style={[styles.bubbleTime, { color: isMine ? 'rgba(255,255,255,0.65)' : colors.muted }]}>
+            {formatTime(item.createdAt)}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Community</Text>
-        <View style={styles.toggleRow}>
-          <TouchableOpacity
-            style={[styles.toggleBtn, chatType === 'society' && styles.toggleActive]}
-            onPress={() => setChatType('society')}
-          >
-            <Text style={[styles.toggleText, chatType === 'society' && styles.toggleTextActive]}>
-              🌐 Society
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toggleBtn, chatType === 'wing' && styles.toggleActive]}
-            onPress={() => setChatType('wing')}
-          >
-            <Text style={[styles.toggleText, chatType === 'wing' && styles.toggleTextActive]}>
-              🏢 Wing A
-            </Text>
-          </TouchableOpacity>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Community</Text>
+        <View style={[styles.tabSwitcher, { backgroundColor: colors.bg }]}>
+          {(['society', 'wing'] as ChatType[]).map((t) => (
+            <TouchableOpacity
+              key={t}
+              style={[styles.tabBtn, chatType === t && { backgroundColor: colors.primary }]}
+              onPress={() => setChatType(t)}
+            >
+              <Text style={[styles.tabBtnText, { color: chatType === t ? '#fff' : colors.subtext }]}>
+                {t === 'society' ? '🏘 Society' : `🏠 Wing ${user?.wing}`}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
       </View>
 
+      {/* Messages */}
       <FlatList
         ref={flatListRef}
         data={messages}
-        keyExtractor={item => item.id}
+        keyExtractor={(item) => item.id}
         renderItem={renderMessage}
-        contentContainerStyle={styles.messagesList}
+        contentContainerStyle={styles.messageList}
         ListEmptyComponent={
-          <View style={styles.emptyChat}>
-            <Text style={styles.emptyChatEmoji}>💬</Text>
-            <Text style={styles.emptyChatText}>No messages yet. Say hello!</Text>
-          </View>
+          <Text style={[styles.emptyText, { color: colors.subtext }]}>
+            No messages yet. Say hi! 👋
+          </Text>
         }
       />
 
+      {/* Input */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.inputRow}>
+        <View style={[styles.inputRow, { backgroundColor: colors.header, borderTopColor: colors.border }]}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
             placeholder="Type a message..."
-            placeholderTextColor="#999"
+            placeholderTextColor={colors.muted}
             value={text}
             onChangeText={setText}
-            multiline
+            onSubmitEditing={handleSend}
+            returnKeyType="send"
           />
           <TouchableOpacity
-            style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
+            style={[styles.sendBtn, { backgroundColor: text.trim() ? colors.primary : colors.muted }]}
             onPress={handleSend}
-            disabled={!text.trim()}
+            disabled={sending || !text.trim()}
           >
-            <Text style={styles.sendText}>➤</Text>
+            <Text style={styles.sendIcon}>➤</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -140,32 +182,43 @@ export default function CommunityScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f4ff' },
-  header: { backgroundColor: '#fff', padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  title: { fontSize: 20, fontWeight: 'bold', color: '#1a1a2e', marginBottom: 12 },
-  toggleRow: { flexDirection: 'row', gap: 8 },
-  toggleBtn: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5, borderColor: '#dde3f0', backgroundColor: '#f0f4ff' },
-  toggleActive: { backgroundColor: '#eef2ff', borderColor: '#4f46e5' },
-  toggleText: { fontSize: 13, fontWeight: '600', color: '#888' },
-  toggleTextActive: { color: '#4f46e5' },
-  messagesList: { padding: 16, paddingBottom: 8 },
-  msgRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 12 },
-  msgRowMe: { flexDirection: 'row-reverse' },
-  avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center', marginRight: 8, borderWidth: 1, borderColor: '#c7d2fe' },
-  avatarText: { fontSize: 14, fontWeight: 'bold', color: '#4f46e5' },
-  bubble: { maxWidth: '75%', backgroundColor: '#fff', borderRadius: 16, borderBottomLeftRadius: 4, padding: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
-  bubbleMe: { backgroundColor: '#4f46e5', borderBottomLeftRadius: 16, borderBottomRightRadius: 4, marginLeft: 8 },
-  msgName: { fontSize: 11, fontWeight: '700', color: '#4f46e5', marginBottom: 4 },
-  msgText: { fontSize: 14, color: '#1a1a2e', lineHeight: 20 },
-  msgTextMe: { color: '#fff' },
-  msgTime: { fontSize: 10, color: '#aaa', marginTop: 4, textAlign: 'right' },
-  msgTimeMe: { color: '#c7d2fe' },
-  emptyChat: { alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
-  emptyChatEmoji: { fontSize: 48, marginBottom: 12 },
-  emptyChatText: { fontSize: 15, color: '#888' },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', padding: 12, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee', gap: 8 },
-  input: { flex: 1, backgroundColor: '#f0f4ff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: '#1a1a2e', borderWidth: 1, borderColor: '#dde3f0', maxHeight: 100 },
-  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#4f46e5', alignItems: 'center', justifyContent: 'center' },
-  sendBtnDisabled: { backgroundColor: '#a5b4fc' },
-  sendText: { color: '#fff', fontSize: 18 },
+  container: { flex: 1 },
+  header: {
+    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12,
+    borderBottomWidth: 1,
+  },
+  headerTitle: { fontSize: 20, fontWeight: '700', marginBottom: 10 },
+  tabSwitcher: { flexDirection: 'row', borderRadius: 12, padding: 3, gap: 3 },
+  tabBtn: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
+  tabBtnText: { fontSize: 13, fontWeight: '600' },
+  messageList: { padding: 12, paddingBottom: 8 },
+  msgRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 10 },
+  msgRowMine: { flexDirection: 'row-reverse' },
+  avatar: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: 8, marginBottom: 2,
+  },
+  avatarText: { fontSize: 13, fontWeight: '700' },
+  bubble: {
+    maxWidth: '75%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10,
+    borderBottomLeftRadius: 4,
+  },
+  bubbleName: { fontSize: 11, fontWeight: '700', marginBottom: 3 },
+  bubbleText: { fontSize: 14, lineHeight: 20 },
+  bubbleTime: { fontSize: 10, marginTop: 4, textAlign: 'right' },
+  emptyText: { textAlign: 'center', marginTop: 60, fontSize: 14 },
+  inputRow: {
+    flexDirection: 'row', padding: 10, gap: 8,
+    borderTopWidth: 1,
+  },
+  input: {
+    flex: 1, borderRadius: 22, paddingHorizontal: 16,
+    paddingVertical: 10, fontSize: 14, borderWidth: 1,
+  },
+  sendBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  sendIcon: { color: '#fff', fontSize: 16 },
 });

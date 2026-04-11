@@ -13,6 +13,7 @@ export default function RootLayout() {
           <Stack.Screen name="register" />
           <Stack.Screen name="approval" />
           <Stack.Screen name="admin" />
+          <Stack.Screen name="complaint-detail" />
           <Stack.Screen name="(tabs)" />
         </Stack>
       </UserProvider>

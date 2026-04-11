@@ -1,104 +1,69 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  TouchableOpacity, ActivityIndicator, TextInput, Modal
+  TouchableOpacity, TextInput, ActivityIndicator, Alert
 } from 'react-native';
-import { db } from '../firebase';
+import { useRouter } from 'expo-router';
+import { db, auth } from '../firebase';
 import {
-  collection, query, where, getDocs,
-  updateDoc, doc, addDoc, onSnapshot, orderBy
+  collection, addDoc, onSnapshot, query, orderBy,
+  deleteDoc, doc, updateDoc
 } from 'firebase/firestore';
 import { useUser } from '../context/UserContext';
+import { useTheme } from '../context/ThemeContext';
 
-type User = {
-  id: string;
-  name: string;
-  flatNo: string;
-  wing: string;
-  phone: string;
-  approved: boolean;
-  createdAt: string;
-};
+const SOCIETY_ID = 'society_001';
+type AdminTab = 'announce' | 'residents' | 'complaints';
 
 export default function AdminScreen() {
+  const router = useRouter();
   const { user } = useUser();
-  const [tab, setTab] = useState<'approvals' | 'announcements' | 'sos'>('approvals');
-  const [users, setUsers] = useState<User[]>([]);
+  const { colors } = useTheme();
+  const [tab, setTab] = useState<AdminTab>('announce');
+
+  // Announcements
   const [announcements, setAnnouncements] = useState<any[]>([]);
-  const [sosAlerts, setSosAlerts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState<string | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
+  const [annTitle, setAnnTitle] = useState('');
+  const [annBody, setAnnBody] = useState('');
   const [posting, setPosting] = useState(false);
 
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const q = query(collection(db, 'users'), where('approved', '==', false));
-      const snapshot = await getDocs(q);
-      setUsers(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as User)));
-    } catch (e: any) {
-      alert('Error: ' + e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Residents
+  const [residents, setResidents] = useState<any[]>([]);
+
+  // Complaints
+  const [complaints, setComplaints] = useState<any[]>([]);
 
   useEffect(() => {
-    fetchUsers();
+    const unsubs: (() => void)[] = [];
 
-    const unsubA = onSnapshot(
-      query(collection(db, 'societies', 'society_001', 'announcements'), orderBy('createdAt', 'desc')),
-      snap => setAnnouncements(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
+    const annQ = query(collection(db, 'societies', SOCIETY_ID, 'announcements'), orderBy('createdAt', 'desc'));
+    unsubs.push(onSnapshot(annQ, (snap) => setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...d.data() })))));
 
-    const unsubS = onSnapshot(
-      query(collection(db, 'societies', 'society_001', 'sos'), orderBy('timestamp', 'desc')),
-      snap => setSosAlerts(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
+    // Fetch pending residents from users collection
+    const { getDocs, where } = require('firebase/firestore');
+    // Use onSnapshot for real-time residents
+    const { collection: col, query: q, onSnapshot: ons } = require('firebase/firestore');
+    unsubs.push(onSnapshot(col(db, 'users'), (snap: any) => {
+      setResidents(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
+    }));
 
-    return () => { unsubA(); unsubS(); };
+    const compQ = query(collection(db, 'societies', SOCIETY_ID, 'complaints'), orderBy('createdAt', 'desc'));
+    unsubs.push(onSnapshot(compQ, (snap) => setComplaints(snap.docs.map((d) => ({ id: d.id, ...d.data() })))));
+
+    return () => unsubs.forEach((u) => u());
   }, []);
 
-  const handleApprove = async (userId: string) => {
-    setUpdating(userId);
-    try {
-      await updateDoc(doc(db, 'users', userId), { approved: true });
-      setUsers(prev => prev.filter(u => u.id !== userId));
-    } catch (e: any) {
-      alert('Error: ' + e.message);
-    } finally {
-      setUpdating(null);
-    }
-  };
-
-  const handleReject = async (userId: string) => {
-    setUpdating(userId);
-    try {
-      await updateDoc(doc(db, 'users', userId), { rejected: true });
-      setUsers(prev => prev.filter(u => u.id !== userId));
-    } catch (e: any) {
-      alert('Error: ' + e.message);
-    } finally {
-      setUpdating(null);
-    }
-  };
-
   const handlePostAnnouncement = async () => {
-    if (!title || !body) { alert('Fill both fields'); return; }
+    if (!annTitle.trim() || !annBody.trim()) return alert('Fill in both fields.');
     setPosting(true);
     try {
-      await addDoc(collection(db, 'societies', 'society_001', 'announcements'), {
-        title,
-        body,
+      await addDoc(collection(db, 'societies', SOCIETY_ID, 'announcements'), {
+        title: annTitle.trim(),
+        body: annBody.trim(),
         postedBy: user?.name,
         createdAt: new Date().toISOString(),
       });
-      setTitle('');
-      setBody('');
-      setShowModal(false);
+      setAnnTitle(''); setAnnBody('');
     } catch (e: any) {
       alert('Error: ' + e.message);
     } finally {
@@ -106,219 +71,257 @@ export default function AdminScreen() {
     }
   };
 
-  const handleResolveSOS = async (id: string) => {
-    await updateDoc(doc(db, 'societies', 'society_001', 'sos', id), { resolved: true });
+  const handleDeleteAnnouncement = (id: string) => {
+    Alert.alert('Delete Announcement', 'This will remove it for everyone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => deleteDoc(doc(db, 'societies', SOCIETY_ID, 'announcements', id)),
+      },
+    ]);
+  };
+
+  const handleApproveResident = async (uid: string) => {
+    await updateDoc(doc(db, 'users', uid), { approved: true });
+  };
+
+  const handleRejectResident = (uid: string) => {
+    Alert.alert('Reject Resident', 'Remove this resident from the society?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reject', style: 'destructive',
+        onPress: () => deleteDoc(doc(db, 'users', uid)),
+      },
+    ]);
+  };
+
+  const handleDeleteComplaint = (id: string) => {
+    Alert.alert('Delete Complaint', 'Remove this complaint permanently?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id)),
+      },
+    ]);
+  };
+
+  const handleStatusChange = async (id: string, status: string) => {
+    await updateDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id), { status });
+  };
+
+  const TABS: { key: AdminTab; label: string }[] = [
+    { key: 'announce', label: '📢 Announce' },
+    { key: 'residents', label: '👥 Residents' },
+    { key: 'complaints', label: '🔧 Complaints' },
+  ];
+
+  const statusColor = (s: string) => {
+    if (s === 'Resolved') return colors.success;
+    if (s === 'In Progress') return colors.warning;
+    return colors.primary;
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Admin Panel</Text>
-        <Text style={styles.subtitle}>Society Panchyat</Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={[styles.back, { color: colors.primary }]}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Admin Panel</Text>
+        <View style={{ width: 60 }} />
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabRow}>
-        {(['approvals', 'announcements', 'sos'] as const).map(t => (
+      {/* Tab Bar */}
+      <View style={[styles.tabBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+        {TABS.map((t) => (
           <TouchableOpacity
-            key={t}
-            style={[styles.tabBtn, tab === t && styles.tabActive]}
-            onPress={() => setTab(t)}
+            key={t.key}
+            style={[styles.tabBtn, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
+            onPress={() => setTab(t.key)}
           >
-            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-              {t === 'approvals' ? `Approvals ${users.length > 0 ? `(${users.length})` : ''}` :
-               t === 'announcements' ? 'Announce' : `SOS ${sosAlerts.filter(s => !s.resolved).length > 0 ? `🔴` : ''}`}
+            <Text style={[styles.tabLabel, { color: tab === t.key ? colors.primary : colors.subtext }]}>
+              {t.label}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* Approvals Tab */}
-      {tab === 'approvals' && (
-        loading ? (
-          <View style={styles.center}><ActivityIndicator size="large" color="#4f46e5" /></View>
-        ) : users.length === 0 ? (
-          <View style={styles.center}>
-            <Text style={styles.emptyEmoji}>✅</Text>
-            <Text style={styles.emptyTitle}>All caught up!</Text>
-            <Text style={styles.emptyText}>No pending approval requests</Text>
-            <TouchableOpacity style={styles.refreshBtn} onPress={fetchUsers}>
-              <Text style={styles.refreshText}>↻ Refresh</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <ScrollView style={styles.scroll}>
-            {users.map(u => (
-              <View key={u.id} style={styles.card}>
-                <View style={styles.cardTop}>
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{u.name?.charAt(0)?.toUpperCase()}</Text>
-                  </View>
-                  <View style={styles.userInfo}>
-                    <Text style={styles.userName}>{u.name}</Text>
-                    <Text style={styles.userFlat}>Wing {u.wing} — Flat {u.flatNo}</Text>
-                    <Text style={styles.userPhone}>{u.phone}</Text>
-                  </View>
-                </View>
-                <Text style={styles.requestedAt}>
-                  {new Date(u.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                </Text>
-                <View style={styles.btnRow}>
-                  <TouchableOpacity style={styles.rejectBtn} onPress={() => handleReject(u.id)} disabled={updating === u.id}>
-                    <Text style={styles.rejectText}>✕ Reject</Text>
+      <ScrollView contentContainerStyle={styles.scroll}>
+
+        {/* ── ANNOUNCE TAB ── */}
+        {tab === 'announce' && (
+          <View>
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.cardHeading, { color: colors.text }]}>New Announcement</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
+                placeholder="Title" placeholderTextColor={colors.muted}
+                value={annTitle} onChangeText={setAnnTitle}
+              />
+              <TextInput
+                style={[styles.input, styles.textArea, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
+                placeholder="Message body..." placeholderTextColor={colors.muted}
+                value={annBody} onChangeText={setAnnBody}
+                multiline numberOfLines={3}
+              />
+              <TouchableOpacity
+                style={[styles.postBtn, { backgroundColor: colors.primary }]}
+                onPress={handlePostAnnouncement}
+                disabled={posting}
+              >
+                {posting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.postBtnText}>Post Announcement</Text>}
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>Past Announcements</Text>
+            {announcements.map((a) => (
+              <View key={a.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.annTitle, { color: colors.text }]}>{a.title}</Text>
+                  <TouchableOpacity onPress={() => handleDeleteAnnouncement(a.id)}>
+                    <Text style={styles.deleteIcon}>🗑</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.approveBtn} onPress={() => handleApprove(u.id)} disabled={updating === u.id}>
-                    {updating === u.id ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.approveText}>✓ Approve</Text>}
+                </View>
+                <Text style={[styles.annBody, { color: colors.subtext }]}>{a.body}</Text>
+                <Text style={[styles.annMeta, { color: colors.muted }]}>By {a.postedBy}</Text>
+              </View>
+            ))}
+            {announcements.length === 0 && <Text style={[styles.emptyText, { color: colors.subtext }]}>No announcements yet.</Text>}
+          </View>
+        )}
+
+        {/* ── RESIDENTS TAB ── */}
+        {tab === 'residents' && (
+          <View>
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>
+              Pending Approval ({residents.filter(r => !r.approved).length})
+            </Text>
+            {residents.filter(r => !r.approved).map((r) => (
+              <View key={r.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.residentName, { color: colors.text }]}>{r.name}</Text>
+                <Text style={[styles.residentMeta, { color: colors.subtext }]}>
+                  {r.wing}-{r.flatNo} • {r.phone}
+                </Text>
+                <View style={styles.residentBtns}>
+                  <TouchableOpacity
+                    style={[styles.approveBtn, { backgroundColor: colors.success + '20', borderColor: colors.success }]}
+                    onPress={() => handleApproveResident(r.id)}
+                  >
+                    <Text style={[styles.approveTxt, { color: colors.success }]}>✓ Approve</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.rejectBtn, { backgroundColor: colors.dangerBg, borderColor: colors.danger }]}
+                    onPress={() => handleRejectResident(r.id)}
+                  >
+                    <Text style={[styles.rejectTxt, { color: colors.danger }]}>✕ Reject</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             ))}
-          </ScrollView>
-        )
-      )}
+            {residents.filter(r => !r.approved).length === 0 && (
+              <Text style={[styles.emptyText, { color: colors.subtext }]}>No pending residents. ✅</Text>
+            )}
 
-      {/* Announcements Tab */}
-      {tab === 'announcements' && (
-        <View style={{ flex: 1 }}>
-          <TouchableOpacity style={styles.postBtn} onPress={() => setShowModal(true)}>
-            <Text style={styles.postBtnText}>+ Post Announcement</Text>
-          </TouchableOpacity>
-          <ScrollView style={styles.scroll}>
-            {announcements.length === 0 ? (
-              <View style={styles.center}>
-                <Text style={styles.emptyEmoji}>📢</Text>
-                <Text style={styles.emptyTitle}>No announcements yet</Text>
-              </View>
-            ) : (
-              announcements.map(a => (
-                <View key={a.id} style={styles.card}>
-                  <Text style={styles.userName}>{a.title}</Text>
-                  <Text style={styles.userFlat}>{a.body}</Text>
-                  <Text style={styles.requestedAt}>
-                    Posted by {a.postedBy} • {new Date(a.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>
+              All Residents ({residents.filter(r => r.approved).length})
+            </Text>
+            {residents.filter(r => r.approved).map((r) => (
+              <View key={r.id} style={[styles.card, styles.residentCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={[styles.residentDot, { backgroundColor: colors.primary }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.residentName, { color: colors.text }]}>{r.name}</Text>
+                  <Text style={[styles.residentMeta, { color: colors.subtext }]}>
+                    {r.wing}-{r.flatNo} • {r.role}
                   </Text>
                 </View>
-              ))
-            )}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* SOS Tab */}
-      {tab === 'sos' && (
-        <ScrollView style={styles.scroll}>
-          {sosAlerts.length === 0 ? (
-            <View style={styles.center}>
-              <Text style={styles.emptyEmoji}>🆘</Text>
-              <Text style={styles.emptyTitle}>No SOS alerts</Text>
-            </View>
-          ) : (
-            sosAlerts.map(s => (
-              <View key={s.id} style={[styles.card, !s.resolved && { borderLeftWidth: 3, borderLeftColor: '#dc2626' }]}>
-                <View style={styles.cardTop}>
-                  <View style={[styles.avatar, { backgroundColor: s.resolved ? '#dcfce7' : '#fee2e2' }]}>
-                    <Text style={styles.avatarText}>🆘</Text>
-                  </View>
-                  <View style={styles.userInfo}>
-                    <Text style={styles.userName}>{s.triggeredBy}</Text>
-                    <Text style={styles.userFlat}>Wing {s.wing} — Flat {s.flatNo}</Text>
-                    <Text style={styles.userPhone}>{s.phone}</Text>
-                  </View>
-                  <View style={[styles.statusBadge, { backgroundColor: s.resolved ? '#dcfce7' : '#fee2e2' }]}>
-                    <Text style={[styles.statusText, { color: s.resolved ? '#16a34a' : '#dc2626' }]}>
-                      {s.resolved ? 'Resolved' : 'Active'}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.requestedAt}>
-                  {new Date(s.timestamp).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                </Text>
-                {!s.resolved && (
-                  <TouchableOpacity style={styles.approveBtn} onPress={() => handleResolveSOS(s.id)}>
-                    <Text style={styles.approveText}>✓ Mark Resolved</Text>
-                  </TouchableOpacity>
-                )}
               </View>
-            ))
-          )}
-        </ScrollView>
-      )}
-
-      {/* Announcement Modal */}
-      <Modal visible={showModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Post Announcement</Text>
-            <Text style={styles.label}>Title</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Water shutdown Sunday"
-              placeholderTextColor="#999"
-              value={title}
-              onChangeText={setTitle}
-            />
-            <Text style={styles.label}>Message</Text>
-            <TextInput
-              style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
-              placeholder="Details of the announcement..."
-              placeholderTextColor="#999"
-              value={body}
-              onChangeText={setBody}
-              multiline
-            />
-            <View style={styles.btnRow}>
-              <TouchableOpacity style={styles.rejectBtn} onPress={() => setShowModal(false)}>
-                <Text style={styles.rejectText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.approveBtn} onPress={handlePostAnnouncement} disabled={posting}>
-                {posting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.approveText}>Post</Text>}
-              </TouchableOpacity>
-            </View>
+            ))}
           </View>
-        </View>
-      </Modal>
+        )}
+
+        {/* ── COMPLAINTS TAB ── */}
+        {tab === 'complaints' && (
+          <View>
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>All Complaints ({complaints.length})</Text>
+            {complaints.map((c) => (
+              <View key={c.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.annTitle, { color: colors.text }]} numberOfLines={1}>{c.title}</Text>
+                  <TouchableOpacity onPress={() => handleDeleteComplaint(c.id)}>
+                    <Text style={styles.deleteIcon}>🗑</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={[styles.residentMeta, { color: colors.subtext }]}>
+                  {c.userName} • {c.wing}-{c.flatNo} • {c.urgency} urgency
+                </Text>
+                <View style={styles.statusRow}>
+                  {['Pending', 'In Progress', 'Resolved'].map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      style={[
+                        styles.statusBtn,
+                        { borderColor: colors.border },
+                        c.status === s && { backgroundColor: statusColor(s) + '20', borderColor: statusColor(s) }
+                      ]}
+                      onPress={() => handleStatusChange(c.id, s)}
+                    >
+                      <Text style={[styles.statusBtnText, { color: c.status === s ? statusColor(s) : colors.muted }]}>
+                        {s}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ))}
+            {complaints.length === 0 && <Text style={[styles.emptyText, { color: colors.subtext }]}>No complaints yet.</Text>}
+          </View>
+        )}
+
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f4ff' },
-  header: { backgroundColor: '#4f46e5', padding: 24, paddingTop: 32 },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
-  subtitle: { fontSize: 14, color: '#c7d2fe', marginTop: 4 },
-  tabRow: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
+  container: { flex: 1 },
+  header: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1,
+  },
+  back: { fontWeight: '600', fontSize: 15, width: 60 },
+  headerTitle: { fontSize: 18, fontWeight: '700' },
+  tabBar: {
+    flexDirection: 'row', borderBottomWidth: 1,
+  },
   tabBtn: { flex: 1, paddingVertical: 12, alignItems: 'center' },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: '#4f46e5' },
-  tabText: { fontSize: 13, fontWeight: '600', color: '#888' },
-  tabTextActive: { color: '#4f46e5' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  emptyEmoji: { fontSize: 48, marginBottom: 12 },
-  emptyTitle: { fontSize: 18, fontWeight: 'bold', color: '#1a1a2e' },
-  emptyText: { fontSize: 14, color: '#888', marginTop: 4 },
-  scroll: { flex: 1, padding: 16 },
-  card: { backgroundColor: '#fff', borderRadius: 14, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  cardTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1.5, borderColor: '#c7d2fe' },
-  avatarText: { fontSize: 18, fontWeight: 'bold', color: '#4f46e5' },
-  userInfo: { flex: 1 },
-  userName: { fontSize: 15, fontWeight: '700', color: '#1a1a2e' },
-  userFlat: { fontSize: 13, color: '#555', marginTop: 2 },
-  userPhone: { fontSize: 12, color: '#888', marginTop: 2 },
-  requestedAt: { fontSize: 12, color: '#aaa', marginBottom: 12 },
-  btnRow: { flexDirection: 'row', gap: 10 },
-  rejectBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1.5, borderColor: '#fca5a5', backgroundColor: '#fee2e2', alignItems: 'center' },
-  rejectText: { color: '#dc2626', fontWeight: '700', fontSize: 13 },
-  approveBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: '#4f46e5', alignItems: 'center' },
-  approveText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  refreshBtn: { marginTop: 16, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20, backgroundColor: '#eef2ff' },
-  refreshText: { color: '#4f46e5', fontWeight: '600' },
-  postBtn: { backgroundColor: '#4f46e5', margin: 16, padding: 14, borderRadius: 12, alignItems: 'center' },
-  postBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  statusText: { fontSize: 11, fontWeight: '700' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a2e', marginBottom: 20 },
-  label: { fontSize: 13, fontWeight: '600', color: '#444', marginBottom: 8 },
-  input: { backgroundColor: '#f0f4ff', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 14, color: '#1a1a2e', borderWidth: 1, borderColor: '#dde3f0', marginBottom: 16 },
+  tabLabel: { fontSize: 13, fontWeight: '600' },
+  scroll: { padding: 16, paddingBottom: 40 },
+  sectionHeading: { fontSize: 15, fontWeight: '700', marginTop: 8, marginBottom: 10 },
+  card: {
+    borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1,
+  },
+  cardHeading: { fontSize: 15, fontWeight: '700', marginBottom: 12 },
+  input: { borderRadius: 12, padding: 12, fontSize: 14, borderWidth: 1, marginBottom: 10 },
+  textArea: { height: 90, textAlignVertical: 'top' },
+  postBtn: { borderRadius: 12, padding: 14, alignItems: 'center' },
+  postBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 },
+  annTitle: { fontSize: 14, fontWeight: '700', flex: 1, marginRight: 8 },
+  annBody: { fontSize: 13, lineHeight: 19, marginBottom: 6 },
+  annMeta: { fontSize: 11 },
+  deleteIcon: { fontSize: 18 },
+  emptyText: { textAlign: 'center', marginTop: 20, fontSize: 14 },
+  residentName: { fontSize: 15, fontWeight: '700', marginBottom: 3 },
+  residentMeta: { fontSize: 12 },
+  residentBtns: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  approveBtn: { flex: 1, padding: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
+  approveTxt: { fontWeight: '700', fontSize: 13 },
+  rejectBtn: { flex: 1, padding: 10, borderRadius: 10, borderWidth: 1, alignItems: 'center' },
+  rejectTxt: { fontWeight: '700', fontSize: 13 },
+  residentCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  residentDot: { width: 8, height: 8, borderRadius: 4 },
+  statusRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  statusBtn: { flex: 1, paddingVertical: 7, borderRadius: 8, borderWidth: 1, alignItems: 'center' },
+  statusBtnText: { fontSize: 11, fontWeight: '600' },
 });
