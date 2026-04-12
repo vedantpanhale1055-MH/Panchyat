@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  TouchableOpacity, TextInput, ActivityIndicator, Alert, Modal
+  TouchableOpacity, TextInput, ActivityIndicator, Modal, Platform
 } from 'react-native';
 import { db, auth } from '../../firebase';
 import {
   collection, addDoc, onSnapshot, query, orderBy,
-  deleteDoc, doc, updateDoc, increment
+  deleteDoc, doc, updateDoc, arrayUnion, arrayRemove
 } from 'firebase/firestore';
 import { useUser } from '../../context/UserContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -14,6 +14,19 @@ import { useRouter } from 'expo-router';
 
 const SOCIETY_ID = 'society_001';
 const URGENCY_LEVELS = ['Low', 'Medium', 'High'];
+
+// Works on both web (window.confirm) and mobile (Alert)
+const confirmDelete = (message: string, onConfirm: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(message)) onConfirm();
+  } else {
+    const { Alert } = require('react-native');
+    Alert.alert('Delete', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
 
 export default function ComplaintsScreen() {
   const { user } = useUser();
@@ -51,13 +64,11 @@ export default function ComplaintsScreen() {
         userName: user?.name,
         flatNo: user?.flatNo,
         wing: user?.wing,
-        upvotes: 0,
+        upvotedBy: [],
+        downvotedBy: [],
         createdAt: new Date().toISOString(),
       });
-      setTitle('');
-      setDescription('');
-      setUrgency('Medium');
-      setShowForm(false);
+      setTitle(''); setDescription(''); setUrgency('Medium'); setShowForm(false);
     } catch (e: any) {
       alert('Error: ' + e.message);
     } finally {
@@ -65,28 +76,37 @@ export default function ComplaintsScreen() {
     }
   };
 
+  const handleVote = async (item: any, type: 'up' | 'down') => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const upvotedBy: string[] = item.upvotedBy || [];
+    const downvotedBy: string[] = item.downvotedBy || [];
+    const ref = doc(db, 'societies', SOCIETY_ID, 'complaints', item.id);
+    if (type === 'up') {
+      if (upvotedBy.includes(uid)) {
+        await updateDoc(ref, { upvotedBy: arrayRemove(uid) });
+      } else {
+        await updateDoc(ref, { upvotedBy: arrayUnion(uid), downvotedBy: arrayRemove(uid) });
+      }
+    } else {
+      if (downvotedBy.includes(uid)) {
+        await updateDoc(ref, { downvotedBy: arrayRemove(uid) });
+      } else {
+        await updateDoc(ref, { downvotedBy: arrayUnion(uid), upvotedBy: arrayRemove(uid) });
+      }
+    }
+  };
+
   const handleDelete = (id: string, ownerId: string) => {
     const isOwner = auth.currentUser?.uid === ownerId;
     const isAdmin = user?.role === 'admin';
-    if (!isOwner && !isAdmin) return alert("You can't delete this.");
-    Alert.alert('Delete Complaint', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id));
-          } catch (e: any) {
-            alert('Failed: ' + e.message);
-          }
-        },
-      },
-    ]);
-  };
-
-  const handleUpvote = async (id: string) => {
-    await updateDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id), {
-      upvotes: increment(1),
+    if (!isOwner && !isAdmin) return;
+    confirmDelete('Delete this complaint? This cannot be undone.', async () => {
+      try {
+        await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id));
+      } catch (e: any) {
+        alert('Delete failed: ' + e.message);
+      }
     });
   };
 
@@ -125,21 +145,16 @@ export default function ComplaintsScreen() {
             <Text style={[styles.label, { color: colors.subtext }]}>Title</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
-              placeholder="Short title"
-              placeholderTextColor={colors.muted}
-              value={title}
-              onChangeText={setTitle}
+              placeholder="Short title" placeholderTextColor={colors.muted}
+              value={title} onChangeText={setTitle}
             />
 
             <Text style={[styles.label, { color: colors.subtext }]}>Description</Text>
             <TextInput
               style={[styles.input, styles.textArea, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
-              placeholder="Describe the issue..."
-              placeholderTextColor={colors.muted}
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              numberOfLines={4}
+              placeholder="Describe the issue..." placeholderTextColor={colors.muted}
+              value={description} onChangeText={setDescription}
+              multiline numberOfLines={4}
             />
 
             <Text style={[styles.label, { color: colors.subtext }]}>Urgency</Text>
@@ -172,8 +187,7 @@ export default function ComplaintsScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.submitBtn, { backgroundColor: colors.primary }]}
-                onPress={handleSubmit}
-                disabled={submitting}
+                onPress={handleSubmit} disabled={submitting}
               >
                 {submitting
                   ? <ActivityIndicator color="#fff" size="small" />
@@ -193,9 +207,15 @@ export default function ComplaintsScreen() {
             <Text style={[styles.emptyText, { color: colors.subtext }]}>No complaints filed yet.</Text>
           )}
           {complaints.map((item) => {
-            const isOwner = auth.currentUser?.uid === item.userId;
+            const uid = auth.currentUser?.uid;
+            const isOwner = uid === item.userId;
             const isAdmin = user?.role === 'admin';
             const canDelete = isOwner || isAdmin;
+            const upvotedBy: string[] = item.upvotedBy || [];
+            const downvotedBy: string[] = item.downvotedBy || [];
+            const hasUpvoted = uid ? upvotedBy.includes(uid) : false;
+            const hasDownvoted = uid ? downvotedBy.includes(uid) : false;
+
             return (
               <TouchableOpacity
                 key={item.id}
@@ -234,11 +254,37 @@ export default function ComplaintsScreen() {
                       {item.userName} • {item.wing}-{item.flatNo}
                     </Text>
                     <View style={styles.footerActions}>
-                      <TouchableOpacity onPress={() => handleUpvote(item.id)} style={styles.upvoteBtn}>
-                        <Text style={[styles.upvoteText, { color: colors.primary }]}>
-                          ▲ {item.upvotes || 0}
+                      {/* Upvote */}
+                      <TouchableOpacity
+                        style={[
+                          styles.voteBtn,
+                          { borderColor: hasUpvoted ? colors.success : colors.border },
+                          hasUpvoted && { backgroundColor: colors.success + '18' },
+                        ]}
+                        onPress={() => handleVote(item, 'up')}
+                      >
+                        <Text style={[styles.voteArrow, { color: hasUpvoted ? colors.success : colors.muted }]}>▲</Text>
+                        <Text style={[styles.voteCount, { color: hasUpvoted ? colors.success : colors.subtext }]}>
+                          {upvotedBy.length}
                         </Text>
                       </TouchableOpacity>
+
+                      {/* Downvote */}
+                      <TouchableOpacity
+                        style={[
+                          styles.voteBtn,
+                          { borderColor: hasDownvoted ? colors.danger : colors.border },
+                          hasDownvoted && { backgroundColor: colors.danger + '18' },
+                        ]}
+                        onPress={() => handleVote(item, 'down')}
+                      >
+                        <Text style={[styles.voteArrow, { color: hasDownvoted ? colors.danger : colors.muted }]}>▼</Text>
+                        <Text style={[styles.voteCount, { color: hasDownvoted ? colors.danger : colors.subtext }]}>
+                          {downvotedBy.length}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {/* Delete */}
                       {canDelete && (
                         <TouchableOpacity
                           onPress={() => handleDelete(item.id, item.userId)}
@@ -280,11 +326,16 @@ const styles = StyleSheet.create({
   statusTag: { fontSize: 11, fontWeight: '700' },
   cardDesc: { fontSize: 13, lineHeight: 19, marginBottom: 10 },
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardMeta: { fontSize: 11 },
-  footerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  upvoteBtn: { padding: 4 },
-  upvoteText: { fontSize: 13, fontWeight: '700' },
-  deleteText: { fontSize: 16 },
+  cardMeta: { fontSize: 11, flex: 1 },
+  footerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  voteBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: 8, borderWidth: 1,
+  },
+  voteArrow: { fontSize: 11, fontWeight: '700' },
+  voteCount: { fontSize: 12, fontWeight: '600' },
+  deleteText: { fontSize: 16, paddingLeft: 4 },
   emptyText: { textAlign: 'center', marginTop: 60, fontSize: 14 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },

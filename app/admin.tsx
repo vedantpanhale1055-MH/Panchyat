@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  TouchableOpacity, TextInput, ActivityIndicator, Alert
+  TouchableOpacity, TextInput, ActivityIndicator, Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { db } from '../firebase';
@@ -15,17 +15,27 @@ import { useTheme } from '../context/ThemeContext';
 const SOCIETY_ID = 'society_001';
 type AdminTab = 'announce' | 'residents' | 'complaints';
 
+const confirmAction = (message: string, onConfirm: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(message)) onConfirm();
+  } else {
+    const { Alert } = require('react-native');
+    Alert.alert('Confirm', message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'OK', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
+
 export default function AdminScreen() {
   const router = useRouter();
   const { user } = useUser();
   const { colors } = useTheme();
   const [tab, setTab] = useState<AdminTab>('announce');
-
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [annTitle, setAnnTitle] = useState('');
   const [annBody, setAnnBody] = useState('');
   const [posting, setPosting] = useState(false);
-
   const [residents, setResidents] = useState<any[]>([]);
   const [complaints, setComplaints] = useState<any[]>([]);
 
@@ -50,13 +60,10 @@ export default function AdminScreen() {
     setPosting(true);
     try {
       await addDoc(collection(db, 'societies', SOCIETY_ID, 'announcements'), {
-        title: annTitle.trim(),
-        body: annBody.trim(),
-        postedBy: user?.name,
-        createdAt: new Date().toISOString(),
+        title: annTitle.trim(), body: annBody.trim(),
+        postedBy: user?.name, createdAt: new Date().toISOString(),
       });
-      setAnnTitle('');
-      setAnnBody('');
+      setAnnTitle(''); setAnnBody('');
     } catch (e: any) {
       alert('Error: ' + e.message);
     } finally {
@@ -65,67 +72,34 @@ export default function AdminScreen() {
   };
 
   const handleDeleteAnnouncement = (id: string) => {
-    Alert.alert('Delete Announcement', 'Remove for all residents?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'announcements', id));
-          } catch (e: any) {
-            alert('Failed: ' + e.message);
-          }
-        },
-      },
-    ]);
+    confirmAction('Delete this announcement for all residents?', async () => {
+      try { await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'announcements', id)); }
+      catch (e: any) { alert('Failed: ' + e.message); }
+    });
   };
 
   const handleApproveResident = async (uid: string) => {
-    try {
-      await updateDoc(doc(db, 'users', uid), { approved: true });
-    } catch (e: any) {
-      alert('Error: ' + e.message);
-    }
+    try { await updateDoc(doc(db, 'users', uid), { approved: true }); }
+    catch (e: any) { alert('Error: ' + e.message); }
   };
 
   const handleRejectResident = (uid: string) => {
-    Alert.alert('Reject Resident', 'Remove this resident?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Reject', style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteDoc(doc(db, 'users', uid));
-          } catch (e: any) {
-            alert('Failed: ' + e.message);
-          }
-        },
-      },
-    ]);
+    confirmAction('Remove this resident?', async () => {
+      try { await deleteDoc(doc(db, 'users', uid)); }
+      catch (e: any) { alert('Failed: ' + e.message); }
+    });
   };
 
   const handleDeleteComplaint = (id: string) => {
-    Alert.alert('Delete Complaint', 'Remove permanently?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id));
-          } catch (e: any) {
-            alert('Failed: ' + e.message);
-          }
-        },
-      },
-    ]);
+    confirmAction('Delete this complaint permanently?', async () => {
+      try { await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id)); }
+      catch (e: any) { alert('Failed: ' + e.message); }
+    });
   };
 
   const handleStatusChange = async (id: string, status: string) => {
-    try {
-      await updateDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id), { status });
-    } catch (e: any) {
-      alert('Failed: ' + e.message);
-    }
+    try { await updateDoc(doc(db, 'societies', SOCIETY_ID, 'complaints', id), { status }); }
+    catch (e: any) { alert('Failed: ' + e.message); }
   };
 
   const TABS: { key: AdminTab; label: string }[] = [
@@ -186,8 +160,7 @@ export default function AdminScreen() {
               />
               <TouchableOpacity
                 style={[styles.postBtn, { backgroundColor: colors.primary }]}
-                onPress={handlePostAnnouncement}
-                disabled={posting}
+                onPress={handlePostAnnouncement} disabled={posting}
               >
                 {posting
                   ? <ActivityIndicator color="#fff" size="small" />
@@ -205,10 +178,7 @@ export default function AdminScreen() {
               <View key={a.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.rowBetween}>
                   <Text style={[styles.annTitle, { color: colors.text }]}>{a.title}</Text>
-                  <TouchableOpacity
-                    onPress={() => handleDeleteAnnouncement(a.id)}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  >
+                  <TouchableOpacity onPress={() => handleDeleteAnnouncement(a.id)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                     <Text style={styles.deleteIcon}>🗑</Text>
                   </TouchableOpacity>
                 </View>
@@ -221,18 +191,12 @@ export default function AdminScreen() {
 
         {tab === 'residents' && (
           <View>
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>
-              Pending Approval ({pending.length})
-            </Text>
-            {pending.length === 0 && (
-              <Text style={[styles.emptyText, { color: colors.subtext }]}>No pending residents ✅</Text>
-            )}
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>Pending ({pending.length})</Text>
+            {pending.length === 0 && <Text style={[styles.emptyText, { color: colors.subtext }]}>No pending residents ✅</Text>}
             {pending.map((r) => (
               <View key={r.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <Text style={[styles.residentName, { color: colors.text }]}>{r.name}</Text>
-                <Text style={[styles.residentMeta, { color: colors.subtext }]}>
-                  {r.wing}-{r.flatNo} • {r.phone}
-                </Text>
+                <Text style={[styles.residentMeta, { color: colors.subtext }]}>{r.wing}-{r.flatNo} • {r.phone}</Text>
                 <View style={styles.residentBtns}>
                   <TouchableOpacity
                     style={[styles.approveBtn, { backgroundColor: colors.success + '20', borderColor: colors.success }]}
@@ -249,18 +213,13 @@ export default function AdminScreen() {
                 </View>
               </View>
             ))}
-
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>
-              All Residents ({approved.length})
-            </Text>
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>All Residents ({approved.length})</Text>
             {approved.map((r) => (
               <View key={r.id} style={[styles.card, styles.residentRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={[styles.residentDot, { backgroundColor: colors.primary }]} />
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.residentName, { color: colors.text }]}>{r.name}</Text>
-                  <Text style={[styles.residentMeta, { color: colors.subtext }]}>
-                    {r.wing}-{r.flatNo} • {r.role}
-                  </Text>
+                  <Text style={[styles.residentMeta, { color: colors.subtext }]}>{r.wing}-{r.flatNo} • {r.role}</Text>
                 </View>
               </View>
             ))}
@@ -269,20 +228,13 @@ export default function AdminScreen() {
 
         {tab === 'complaints' && (
           <View>
-            <Text style={[styles.sectionHeading, { color: colors.text }]}>
-              All Complaints ({complaints.length})
-            </Text>
-            {complaints.length === 0 && (
-              <Text style={[styles.emptyText, { color: colors.subtext }]}>No complaints yet.</Text>
-            )}
+            <Text style={[styles.sectionHeading, { color: colors.text }]}>All Complaints ({complaints.length})</Text>
+            {complaints.length === 0 && <Text style={[styles.emptyText, { color: colors.subtext }]}>No complaints yet.</Text>}
             {complaints.map((c) => (
               <View key={c.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.rowBetween}>
                   <Text style={[styles.annTitle, { color: colors.text }]} numberOfLines={1}>{c.title}</Text>
-                  <TouchableOpacity
-                    onPress={() => handleDeleteComplaint(c.id)}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  >
+                  <TouchableOpacity onPress={() => handleDeleteComplaint(c.id)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                     <Text style={styles.deleteIcon}>🗑</Text>
                   </TouchableOpacity>
                 </View>
@@ -294,8 +246,7 @@ export default function AdminScreen() {
                     <TouchableOpacity
                       key={s}
                       style={[
-                        styles.statusBtn,
-                        { borderColor: colors.border },
+                        styles.statusBtn, { borderColor: colors.border },
                         c.status === s && { backgroundColor: statusColor(s) + '20', borderColor: statusColor(s) },
                       ]}
                       onPress={() => handleStatusChange(c.id, s)}

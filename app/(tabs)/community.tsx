@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, FlatList,
-  TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform
+  TouchableOpacity, TextInput, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { db, auth } from '../../firebase';
 import {
@@ -12,8 +12,19 @@ import { useUser } from '../../context/UserContext';
 import { useTheme } from '../../context/ThemeContext';
 
 const SOCIETY_ID = 'society_001';
-
 type ChatType = 'society' | 'wing';
+
+const confirmDelete = (onConfirm: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm('Delete this message?')) onConfirm();
+  } else {
+    const { Alert } = require('react-native');
+    Alert.alert('Delete Message', 'Remove this message?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
 
 export default function CommunityScreen() {
   const { user } = useUser();
@@ -24,12 +35,18 @@ export default function CommunityScreen() {
   const [sending, setSending] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
-  useEffect(() => {
-    const chatPath = chatType === 'society'
+  const getChatCol = (type: ChatType) =>
+    type === 'society'
       ? collection(db, 'societies', SOCIETY_ID, 'chats', 'society', 'messages')
       : collection(db, 'societies', SOCIETY_ID, 'chats', `wing_${user?.wing || 'A'}`, 'messages');
 
-    const q = query(chatPath, orderBy('createdAt', 'asc'));
+  const getMsgDoc = (type: ChatType, id: string) =>
+    type === 'society'
+      ? doc(db, 'societies', SOCIETY_ID, 'chats', 'society', 'messages', id)
+      : doc(db, 'societies', SOCIETY_ID, 'chats', `wing_${user?.wing || 'A'}`, 'messages', id);
+
+  useEffect(() => {
+    const q = query(getChatCol(chatType), orderBy('createdAt', 'asc'));
     return onSnapshot(q, (snap) => {
       setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -40,11 +57,7 @@ export default function CommunityScreen() {
     if (!text.trim()) return;
     setSending(true);
     try {
-      const chatPath = chatType === 'society'
-        ? collection(db, 'societies', SOCIETY_ID, 'chats', 'society', 'messages')
-        : collection(db, 'societies', SOCIETY_ID, 'chats', `wing_${user?.wing || 'A'}`, 'messages');
-
-      await addDoc(chatPath, {
+      await addDoc(getChatCol(chatType), {
         text: text.trim(),
         userId: auth.currentUser?.uid,
         userName: user?.name,
@@ -60,23 +73,17 @@ export default function CommunityScreen() {
     }
   };
 
-  const handleLongPress = (item: any) => {
+  const handleDelete = (item: any) => {
     const isOwner = auth.currentUser?.uid === item.userId;
     const isAdmin = user?.role === 'admin';
     if (!isOwner && !isAdmin) return;
-
-    Alert.alert('Delete Message', 'Delete this message?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: () => {
-          const chatPath = chatType === 'society'
-            ? doc(db, 'societies', SOCIETY_ID, 'chats', 'society', 'messages', item.id)
-            : doc(db, 'societies', SOCIETY_ID, 'chats', `wing_${user?.wing || 'A'}`, 'messages', item.id);
-          deleteDoc(chatPath);
-        },
-      },
-    ]);
+    confirmDelete(async () => {
+      try {
+        await deleteDoc(getMsgDoc(chatType, item.id));
+      } catch (e: any) {
+        alert('Failed: ' + e.message);
+      }
+    });
   };
 
   const formatTime = (iso: string) => {
@@ -87,12 +94,10 @@ export default function CommunityScreen() {
 
   const renderMessage = ({ item }: { item: any }) => {
     const isMine = auth.currentUser?.uid === item.userId;
+    const canDelete = isMine || user?.role === 'admin';
+
     return (
-      <TouchableOpacity
-        onLongPress={() => handleLongPress(item)}
-        activeOpacity={0.85}
-        style={[styles.msgRow, isMine && styles.msgRowMine]}
-      >
+      <View style={[styles.msgRow, isMine && styles.msgRowMine]}>
         {!isMine && (
           <View style={[styles.avatar, { backgroundColor: colors.primary + '30' }]}>
             <Text style={[styles.avatarText, { color: colors.primary }]}>
@@ -100,31 +105,41 @@ export default function CommunityScreen() {
             </Text>
           </View>
         )}
-        <View style={[
-          styles.bubble,
-          isMine
-            ? { backgroundColor: colors.primary }
-            : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }
-        ]}>
-          {!isMine && (
-            <Text style={[styles.bubbleName, { color: colors.primary }]}>
-              {item.userName} • {item.wing}-{item.flatNo}
+        <View style={[styles.bubbleWrapper, isMine && styles.bubbleWrapperMine]}>
+          <View style={[
+            styles.bubble,
+            isMine
+              ? { backgroundColor: colors.primary }
+              : { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 },
+          ]}>
+            {!isMine && (
+              <Text style={[styles.bubbleName, { color: colors.primary }]}>
+                {item.userName} • {item.wing}-{item.flatNo}
+              </Text>
+            )}
+            <Text style={[styles.bubbleText, { color: isMine ? '#fff' : colors.text }]}>
+              {item.text}
             </Text>
+            <Text style={[styles.bubbleTime, { color: isMine ? 'rgba(255,255,255,0.65)' : colors.muted }]}>
+              {formatTime(item.createdAt)}
+            </Text>
+          </View>
+          {canDelete && (
+            <TouchableOpacity
+              style={[styles.msgDeleteBtn, isMine && styles.msgDeleteBtnMine]}
+              onPress={() => handleDelete(item)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.msgDeleteIcon}>🗑</Text>
+            </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleText, { color: isMine ? '#fff' : colors.text }]}>
-            {item.text}
-          </Text>
-          <Text style={[styles.bubbleTime, { color: isMine ? 'rgba(255,255,255,0.65)' : colors.muted }]}>
-            {formatTime(item.createdAt)}
-          </Text>
         </View>
-      </TouchableOpacity>
+      </View>
     );
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
-      {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Community</Text>
         <View style={[styles.tabSwitcher, { backgroundColor: colors.bg }]}>
@@ -142,7 +157,6 @@ export default function CommunityScreen() {
         </View>
       </View>
 
-      {/* Messages */}
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -150,13 +164,10 @@ export default function CommunityScreen() {
         renderItem={renderMessage}
         contentContainerStyle={styles.messageList}
         ListEmptyComponent={
-          <Text style={[styles.emptyText, { color: colors.subtext }]}>
-            No messages yet. Say hi! 👋
-          </Text>
+          <Text style={[styles.emptyText, { color: colors.subtext }]}>No messages yet. Say hi! 👋</Text>
         }
       />
 
-      {/* Input */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.inputRow, { backgroundColor: colors.header, borderTopColor: colors.border }]}>
           <TextInput
@@ -183,16 +194,13 @@ export default function CommunityScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
+  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 1 },
   headerTitle: { fontSize: 20, fontWeight: '700', marginBottom: 10 },
   tabSwitcher: { flexDirection: 'row', borderRadius: 12, padding: 3, gap: 3 },
   tabBtn: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
   tabBtnText: { fontSize: 13, fontWeight: '600' },
   messageList: { padding: 12, paddingBottom: 8 },
-  msgRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 10 },
+  msgRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 14 },
   msgRowMine: { flexDirection: 'row-reverse' },
   avatar: {
     width: 32, height: 32, borderRadius: 16,
@@ -200,25 +208,21 @@ const styles = StyleSheet.create({
     marginRight: 8, marginBottom: 2,
   },
   avatarText: { fontSize: 13, fontWeight: '700' },
-  bubble: {
-    maxWidth: '75%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10,
-    borderBottomLeftRadius: 4,
-  },
+  bubbleWrapper: { alignItems: 'flex-start', maxWidth: '75%' },
+  bubbleWrapperMine: { alignItems: 'flex-end' },
+  bubble: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, borderBottomLeftRadius: 4 },
   bubbleName: { fontSize: 11, fontWeight: '700', marginBottom: 3 },
   bubbleText: { fontSize: 14, lineHeight: 20 },
   bubbleTime: { fontSize: 10, marginTop: 4, textAlign: 'right' },
+  msgDeleteBtn: { marginTop: 4, alignSelf: 'flex-start' },
+  msgDeleteBtnMine: { alignSelf: 'flex-end' },
+  msgDeleteIcon: { fontSize: 13 },
   emptyText: { textAlign: 'center', marginTop: 60, fontSize: 14 },
-  inputRow: {
-    flexDirection: 'row', padding: 10, gap: 8,
-    borderTopWidth: 1,
-  },
+  inputRow: { flexDirection: 'row', padding: 10, gap: 8, borderTopWidth: 1 },
   input: {
     flex: 1, borderRadius: 22, paddingHorizontal: 16,
     paddingVertical: 10, fontSize: 14, borderWidth: 1,
   },
-  sendBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   sendIcon: { color: '#fff', fontSize: 16 },
 });

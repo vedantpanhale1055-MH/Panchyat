@@ -17,6 +17,7 @@ export default function ProfileScreen() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [saving, setSaving] = useState(false);
+  const [togglingRole, setTogglingRole] = useState(false);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -36,15 +37,28 @@ export default function ProfileScreen() {
     }
   };
 
+  // Direct toggle — no Alert dialog (works on both web and mobile)
+  const handleToggleRole = async () => {
+    if (!user) return;
+    const newRole = user.role === 'admin' ? 'resident' : 'admin';
+    setTogglingRole(true);
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { role: newRole });
+      // onSnapshot in UserContext will auto-update user.role
+    } catch (e: any) {
+      alert('Failed to switch role: ' + e.message);
+    } finally {
+      setTogglingRole(false);
+    }
+  };
+
+  const isAdmin = user?.role === 'admin';
+
   const infoItems = [
     { label: 'Wing', value: user?.wing },
     { label: 'Flat', value: user?.flatNo },
     { label: 'Role', value: user?.role },
-    {
-      label: 'Status',
-      value: user?.approved ? 'Approved ✅' : 'Pending ⏳',
-      bold: !user?.approved,
-    },
+    { label: 'Status', value: user?.approved ? 'Approved ✅' : 'Pending ⏳' },
   ];
 
   return (
@@ -53,18 +67,15 @@ export default function ProfileScreen() {
       <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
         <Text style={[styles.title, { color: colors.text }]}>Profile</Text>
         <View style={styles.headerRight}>
-          {/* Dark / Light toggle */}
           <TouchableOpacity
             onPress={toggleTheme}
             style={[styles.themeToggle, { backgroundColor: colors.bg, borderColor: colors.border }]}
-            activeOpacity={0.7}
           >
             <Text style={styles.themeIcon}>{theme === 'dark' ? '☀️' : '🌙'}</Text>
             <Text style={[styles.themeLabel, { color: colors.subtext }]}>
               {theme === 'dark' ? 'Light' : 'Dark'}
             </Text>
           </TouchableOpacity>
-
           {!editing && (
             <TouchableOpacity
               onPress={() => setEditing(true)}
@@ -76,7 +87,6 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Content */}
       <View style={styles.content}>
         {/* Avatar */}
         <View style={[styles.avatarCircle, { backgroundColor: colors.primary + '20', borderColor: colors.primary + '50' }]}>
@@ -125,18 +135,40 @@ export default function ProfileScreen() {
           {infoItems.map((item) => (
             <View key={item.label} style={[styles.infoBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Text style={[styles.infoLabel, { color: colors.subtext }]}>{item.label}</Text>
-              <Text style={[styles.infoValue, { color: item.bold ? colors.warning : colors.text }]}>
-                {item.value}
-              </Text>
+              <Text style={[styles.infoValue, { color: colors.text }]}>{item.value}</Text>
             </View>
           ))}
         </View>
 
-        {/* Admin Panel (only for admins) */}
-        {user?.role === 'admin' && (
+        {/* Role Toggle */}
+        <TouchableOpacity
+          style={[
+            styles.roleToggleBtn,
+            {
+              backgroundColor: isAdmin ? colors.warning + '18' : colors.primary + '18',
+              borderColor: isAdmin ? colors.warning : colors.primary,
+            },
+          ]}
+          onPress={handleToggleRole}
+          disabled={togglingRole}
+        >
+          {togglingRole ? (
+            <ActivityIndicator color={isAdmin ? colors.warning : colors.primary} size="small" />
+          ) : (
+            <>
+              <Text style={styles.roleToggleIcon}>{isAdmin ? '👤' : '🛡'}</Text>
+              <Text style={[styles.roleToggleText, { color: isAdmin ? colors.warning : colors.primary }]}>
+                {isAdmin ? 'Switch to Resident' : 'Switch to Admin'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {/* Admin Panel */}
+        {isAdmin && (
           <TouchableOpacity
             style={[styles.adminBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => router.push('/admin')}
+            onPress={() => router.push('/admin' as any)}
           >
             <Text style={[styles.adminBtnText, { color: colors.primary }]}>🛡 Admin Panel</Text>
           </TouchableOpacity>
@@ -164,15 +196,11 @@ const styles = StyleSheet.create({
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   themeToggle: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 20, borderWidth: 1,
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1,
   },
   themeIcon: { fontSize: 15 },
   themeLabel: { fontSize: 12, fontWeight: '600' },
-  editBtn: {
-    paddingHorizontal: 14, paddingVertical: 6,
-    borderRadius: 20, borderWidth: 1.5,
-  },
+  editBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1.5 },
   editBtnText: { fontSize: 13, fontWeight: '600' },
   content: { flex: 1, alignItems: 'center', paddingHorizontal: 24, paddingTop: 28 },
   avatarCircle: {
@@ -190,16 +218,20 @@ const styles = StyleSheet.create({
   cancelText: { fontWeight: '600' },
   saveBtn: { flex: 1, padding: 12, borderRadius: 10, alignItems: 'center' },
   saveText: { color: '#fff', fontWeight: '700' },
-  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, width: '100%', marginBottom: 24 },
-  infoBox: {
-    flex: 1, minWidth: '45%', borderRadius: 14, padding: 16,
-    alignItems: 'center', borderWidth: 1,
-  },
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, width: '100%', marginBottom: 16 },
+  infoBox: { flex: 1, minWidth: '45%', borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1 },
   infoLabel: { fontSize: 12, marginBottom: 4 },
   infoValue: { fontSize: 16, fontWeight: '700' },
+  roleToggleBtn: {
+    width: '100%', flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'center', gap: 8,
+    borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1.5,
+  },
+  roleToggleIcon: { fontSize: 16 },
+  roleToggleText: { fontWeight: '700', fontSize: 14 },
   adminBtn: {
     width: '100%', borderRadius: 12, padding: 16,
-    alignItems: 'center', marginBottom: 12, borderWidth: 1,
+    alignItems: 'center', marginBottom: 10, borderWidth: 1,
   },
   adminBtnText: { fontWeight: '700', fontSize: 15 },
   logoutBtn: {
