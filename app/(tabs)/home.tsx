@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  TouchableOpacity, Linking, ActivityIndicator, Alert
+  TouchableOpacity, Linking, ActivityIndicator, Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { db } from '../../firebase';
@@ -14,25 +14,35 @@ import { useTheme } from '../../context/ThemeContext';
 
 const SOCIETY_ID = 'society_001';
 
+const confirmDelete = (msg: string, onConfirm: () => void) => {
+  if (Platform.OS === 'web') { if (window.confirm(msg)) onConfirm(); }
+  else {
+    const { Alert } = require('react-native');
+    Alert.alert('Delete', msg, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useUser();
-  const { colors } = useTheme();
+  const { theme, toggleTheme, colors } = useTheme();
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [recentComplaints, setRecentComplaints] = useState<any[]>([]);
   const [adminPhone, setAdminPhone] = useState('');
   const [loading, setLoading] = useState(true);
+  const isAdmin = user?.role === 'admin';
 
   useEffect(() => {
-    // Fetch adminPhone from society doc directly
     getDoc(doc(db, 'societies', SOCIETY_ID)).then((snap) => {
       if (snap.exists()) setAdminPhone(snap.data()?.adminPhone || '');
     });
 
     const annQ = query(
       collection(db, 'societies', SOCIETY_ID, 'announcements'),
-      orderBy('createdAt', 'desc'),
-      limit(5)
+      orderBy('createdAt', 'desc'), limit(10)
     );
     const unsubAnn = onSnapshot(annQ, (snap) => {
       setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -41,8 +51,7 @@ export default function HomeScreen() {
 
     const compQ = query(
       collection(db, 'societies', SOCIETY_ID, 'complaints'),
-      orderBy('createdAt', 'desc'),
-      limit(3)
+      orderBy('createdAt', 'desc'), limit(3)
     );
     const unsubComp = onSnapshot(compQ, (snap) => {
       setRecentComplaints(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -52,24 +61,28 @@ export default function HomeScreen() {
   }, []);
 
   const handleCallAdmin = () => {
-    if (!adminPhone) return alert('Admin phone number not set yet.\n\nAdmin: Add "adminPhone" field to the society_001 document in Firestore.');
+    if (!adminPhone) return alert('Admin phone not set yet.\nAdmin: Add "adminPhone" field to society_001 in Firestore.');
     Linking.openURL(`tel:${adminPhone}`);
   };
 
   const handleDeleteAnnouncement = (id: string) => {
-    Alert.alert('Delete Announcement', 'Remove for all residents?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'announcements', id));
-          } catch (e: any) {
-            alert('Failed: ' + e.message);
-          }
-        },
-      },
-    ]);
+    confirmDelete('Remove this announcement for all residents?', async () => {
+      try { await deleteDoc(doc(db, 'societies', SOCIETY_ID, 'announcements', id)); }
+      catch (e: any) { alert('Failed: ' + e.message); }
+    });
+  };
+
+  // Sort: pinned/emergency first, then by date
+  const sorted = [...announcements].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return 0;
+  });
+
+  const statusColor = (s: string) => {
+    if (s === 'Resolved') return colors.success;
+    if (s === 'In Progress') return colors.warning;
+    return colors.primary;
   };
 
   const quickActions = [
@@ -80,14 +93,6 @@ export default function HomeScreen() {
     { emoji: '📞', label: 'Call Admin', action: handleCallAdmin },
   ];
 
-  const statusColor = (s: string) => {
-    if (s === 'Resolved') return colors.success;
-    if (s === 'In Progress') return colors.warning;
-    return colors.primary;
-  };
-
-  const isAdmin = user?.role === 'admin';
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -96,12 +101,18 @@ export default function HomeScreen() {
         <View style={[styles.header, { backgroundColor: colors.header, borderBottomColor: colors.border }]}>
           <View>
             <Text style={[styles.greeting, { color: colors.subtext }]}>Welcome back,</Text>
-            <Text style={[styles.userName, { color: colors.text }]}>{user?.name || 'Resident'} 👋</Text>
+            <Text style={[styles.userName, { color: colors.text }]}>{user?.name || 'Resident'} {isAdmin ? '🛡' : '👋'}</Text>
           </View>
-          <View style={[styles.flatBadge, { backgroundColor: colors.primary + '20', borderColor: colors.primary + '40' }]}>
-            <Text style={[styles.flatText, { color: colors.primary }]}>
-              {user?.wing}-{user?.flatNo}
-            </Text>
+          <View style={styles.headerRight}>
+            <TouchableOpacity
+              onPress={toggleTheme}
+              style={[styles.themeBtn, { backgroundColor: colors.bg, borderColor: colors.border }]}
+            >
+              <Text style={styles.themeIcon}>{theme === 'dark' ? '☀️' : '🌙'}</Text>
+            </TouchableOpacity>
+            <View style={[styles.flatBadge, { backgroundColor: colors.primary + '20', borderColor: colors.primary + '40' }]}>
+              <Text style={[styles.flatText, { color: colors.primary }]}>{user?.wing}-{user?.flatNo}</Text>
+            </View>
           </View>
         </View>
 
@@ -123,19 +134,27 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Latest Announcements */}
+        {/* Announcements */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Latest Announcements</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Announcements</Text>
           {loading ? (
             <ActivityIndicator color={colors.primary} />
-          ) : announcements.length === 0 ? (
+          ) : sorted.length === 0 ? (
             <Text style={[styles.emptyText, { color: colors.subtext }]}>No announcements yet.</Text>
           ) : (
-            announcements.map((a) => (
-              <View key={a.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            sorted.map((a) => (
+              <View
+                key={a.id}
+                style={[
+                  styles.card,
+                  { backgroundColor: colors.card, borderColor: a.emergency ? colors.danger : (a.pinned ? colors.warning : colors.border) },
+                  (a.emergency || a.pinned) && { borderWidth: 1.5 },
+                ]}
+              >
                 <View style={styles.cardRow}>
-                  <Text style={[styles.cardTitle, { color: colors.text, flex: 1 }]}>{a.title}</Text>
-                  {/* Only admin can delete announcements */}
+                  <Text style={[styles.cardTitle, { color: a.emergency ? colors.danger : colors.text, flex: 1 }]}>
+                    {a.emergency ? '🚨 ' : a.pinned ? '📌 ' : ''}{a.title}
+                  </Text>
                   {isAdmin && (
                     <TouchableOpacity
                       onPress={() => handleDeleteAnnouncement(a.id)}
@@ -145,16 +164,14 @@ export default function HomeScreen() {
                     </TouchableOpacity>
                   )}
                 </View>
-                <Text style={[styles.cardBody, { color: colors.subtext }]} numberOfLines={2}>
-                  {a.body}
-                </Text>
+                <Text style={[styles.cardBody, { color: colors.subtext }]} numberOfLines={2}>{a.body}</Text>
               </View>
             ))
           )}
         </View>
 
         {/* Recent Complaints */}
-        <View style={styles.section}>
+        <View style={[styles.section, { paddingBottom: 24 }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Complaints</Text>
           {recentComplaints.length === 0 ? (
             <Text style={[styles.emptyText, { color: colors.subtext }]}>No complaints filed yet.</Text>
@@ -162,14 +179,10 @@ export default function HomeScreen() {
             recentComplaints.map((c) => (
               <View key={c.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.cardRow}>
-                  <Text style={[styles.cardTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>
-                    {c.title}
-                  </Text>
+                  <Text style={[styles.cardTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>{c.title}</Text>
                   <Text style={[styles.statusBadge, { color: statusColor(c.status) }]}>{c.status}</Text>
                 </View>
-                <Text style={[styles.cardBody, { color: colors.subtext }]}>
-                  {c.userName} • Flat {c.flatNo}
-                </Text>
+                <Text style={[styles.cardBody, { color: colors.subtext }]}>{c.userName} • Flat {c.flatNo}</Text>
               </View>
             ))
           )}
@@ -188,6 +201,12 @@ const styles = StyleSheet.create({
   },
   greeting: { fontSize: 13 },
   userName: { fontSize: 20, fontWeight: '700', marginTop: 2 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  themeBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1,
+  },
+  themeIcon: { fontSize: 16 },
   flatBadge: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
   flatText: { fontSize: 13, fontWeight: '700' },
   section: { paddingHorizontal: 16, paddingTop: 20 },
